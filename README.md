@@ -6,7 +6,7 @@
 > 在 Typecho 博客系统中实现类似微博的说说功能，支持API提交、后台管理和前端展示
 
 ## 当前版本
-V1.2.3
+V1.2.6
 
 ## 使用方法
 
@@ -26,7 +26,18 @@ V1.2.3
 - 如果你还有特殊的需求，还可以指定相关的样式和JS
 
 ```php
-<?php \TypechoPlugin\Says\Plugin::render(10, '#says', '/memos/', ['css' => '', 'markdown' => 'https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js', 'js' => './says.js']);?>
+<?php 
+    \TypechoPlugin\Says\Plugin::render(
+        10, 
+        '#says', 
+        '/memos/', 
+        [
+            'css' => '', 
+            'markdown' => 'https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js', 
+            'js' => './says.js'
+        ]
+    );
+?>
 ```
 这样配置，系统将会不加载默认样式，并加载公共的markd库和本地的JS文件
 
@@ -35,6 +46,19 @@ V1.2.3
 ** 令牌一定要生成一个足够长的，可以用32位md5生成
 
 ## 版本更新
+
+### 1.2.5
+ - 修复后台修改时的时区错误
+ - 修改前台的网易云音乐和Bilibili的解析，链接显示文字和链接不同的时候，不会解析，防止只想引用链接而被强制解析成播放器的尴尬，即现在的解析支持的是
+
+   |链接写法|是否解析|
+   |-|-|
+   |https://bilibili.com/video/BV12345|会解析|
+   |\[https://bilibili.com/video/BV12345\]\(https://bilibili.com/video/BV12345\)|会解析|
+   |\[https://bilibili.com/video/BV12345\]\(//bilibili.com/video/BV12345\)|不会解析|
+   |\[点我跳转\](//bilibili.com/video/BV12345)|不会解析|
+
+
 ### 1.2.4
  - 兼容 Sqlite 数据库
  - 添加是否在禁用插件时删除表的选项

@@ -1,0 +1,82 @@
+.typecho-list-table-row {
+  position: relative;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e3e3e3;
+  background: #fff;
+  border-radius: 2px;
+}
+
+.say-operation {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.say-content {
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.say-content img {
+  max-width: 500px;
+  height: auto;
+}
+
+.say-meta {
+  color: #999;
+  font-size: 0.92857em;
+}
+
+.say-date,
+.say-source {
+  margin-right: 15px;
+}
+
+.submit {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.submit .left {
+  display: flex;
+  width: 70%;
+}
+
+.submit .left .text-s {
+  width: 100%;
+}
+
+.submit .right {
+  margin-left: auto;
+  width: 20%;
+  text-align: right;
+}
+
+.submit .right button {
+  width: 100%;
+}
+
+#message-container {
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.success-message {
+  background-color: #f0f9eb;
+  color: #67c23a;
+  border: 1px solid #e1f3d8;
+}
+
+.error-message {
+  background-color: #fef0f0;
+  color: #f56c6c;
+  border: 1px solid #fde2e2;
+}
+
+.operating {
+  opacity: 0.5;
+  pointer-events: none;
+}

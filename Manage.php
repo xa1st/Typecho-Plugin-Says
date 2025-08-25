@@ -276,22 +276,22 @@ $userId = isset($pluginOptions->userId) && !empty($pluginOptions->userId) ?  $pl
                             </div>
                         <?php else: ?>
                             <?php foreach ($saysList as $say): ?>
-                                <div class="typecho-list-table-row" id="say-<?php echo $say['id']; ?>">
+                                <div class="typecho-list-table-row say-list" id="say-<?php echo $say['id']; ?>">
                                     <div class="say-operation">
                                         <a href="javascript:;" data-id="<?php echo $say['id']; ?>" class="operate-edit"><?php _e('编辑'); ?></a>
                                         <a href="javascript:;" data-id="<?php echo $say['id']; ?>" class="operate-delete"><?php _e('删除'); ?></a>
                                     </div>
                                     <div class="say-content" data-raw-content="<?php echo htmlspecialchars($say['content']); ?>"></div>
                                     <div class="say-meta">
-                                        <span class="say-date" data-timestamp="<?php echo $say['updated_at']; ?>"><?php echo date('Y-m-d H:i:s', $say['updated_at']); ?></span>
-                                        <span class="say-source"><?php _e('来源'); ?>: <span class="source-text"><?php echo getPlatform($say['agent']); ?></span></span>
-                                        <span class="say-source"><?php _e('说说ID'); ?>: <?php echo $say['id']; ?></span>
+                                        <span class="say-source"><?php _e('ID'); ?>: <?php echo $say['id']; ?></span>
+                                        <?php $from = getPlatform($say['agent']); ?>
+                                        <span class="say-source"><?php _e('来源'); ?>: <span class="source-text"><?php echo empty($from) ? '本站' : trim($from); ?></span></span>
+                                        <span class="say-date" data-timestamp="<?php echo $say['updated_at']; ?>"></span>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </div>
-              
                     <!-- 分页导航 -->
                     <?php if ($totalPages > 1): ?>
                     <div class="typecho-pager" style="float:unset">
@@ -422,12 +422,8 @@ $userId = isset($pluginOptions->userId) && !empty($pluginOptions->userId) ?  $pl
 }
 </style>
 
-<!-- 引入Typecho的时间选择器 -->
-<link rel="stylesheet" href="<?php $options->adminStaticUrl('css', 'datetimepicker.css'); ?>">
-<script src="<?php $options->adminStaticUrl('js', 'datetimepicker.js'); ?>"></script>
-
 <!-- 引入JS文件 -->
-<script src="<?php $options->pluginUrl('Says/static/markdown.min.js'); ?>"></script>
+<script src="<?php $options->pluginUrl('Says/static/markd.min.js'); ?>"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const publishBtn = document.getElementById('publish-btn');
@@ -445,15 +441,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const cancelEditBtn = document.getElementById('cancel-edit-btn');
     const editSayIdInput = document.getElementById('edit-say-id');
 
-    // 初始化时间选择器
-    if (typeof DateTimePicker !== 'undefined') {
-        new DateTimePicker({
-            element: editTimeInput,
-            format: 'Y-m-d H:i:s',
-            timePicker: true
-        });
-    }
-
     // Markdown解析函数
     function parseMarkdown(content) {
         // 检查markdown库是否已加载
@@ -464,14 +451,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 解析页面中所有已有的说说内容
     function parseExistingContent() {
-        document.querySelectorAll('.say-content[data-raw-content]').forEach(function(element) {
-            const rawContent = element.getAttribute('data-raw-content');
-            element.innerHTML = parseMarkdown(rawContent);
+        // 一次性处理每个说说项目
+        document.querySelectorAll('.typecho-list-table-row.say-list').forEach(function(sayRow) {
+            // 解析内容
+            const contentElement = sayRow.querySelector('.say-content[data-raw-content]');
+            if (contentElement) {
+                const rawContent = contentElement.getAttribute('data-raw-content');
+                contentElement.innerHTML = parseMarkdown(rawContent);
+            }
+            // 解析时间
+            const dateElement = sayRow.querySelector('.say-date[data-timestamp]');
+            if (dateElement) {
+                const timestamp = dateElement.getAttribute('data-timestamp');
+                const date = new Date(timestamp * 1000);
+                dateElement.innerHTML = generateTime(date);
+            }
         });
     }
 
     // 页面加载时解析所有现有内容
     parseExistingContent();
+
+    // 时间生成
+    function generateTime(date) {
+        return date.getFullYear() + '-' + 
+                String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(date.getDate()).padStart(2, '0') + ' ' + 
+                String(date.getHours()).padStart(2, '0') + ':' + 
+                String(date.getMinutes()).padStart(2, '0') + ':' + 
+                String(date.getSeconds()).padStart(2, '0');
+    }
     
     // 显示消息
     function showMessage(message, type, container) {
@@ -489,12 +498,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 添加说说到列表
     function addSayToList(id, content, source) {
         const now = new Date();
-        const formattedDate = now.getFullYear() + '-' + 
-                             String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                             String(now.getDate()).padStart(2, '0') + ' ' + 
-                             String(now.getHours()).padStart(2, '0') + ':' + 
-                             String(now.getMinutes()).padStart(2, '0') + ':' + 
-                             String(now.getSeconds()).padStart(2, '0');
+        const formattedDate = generateTime(now);
   
         const newSay = document.createElement('div');
         newSay.className = 'typecho-list-table-row';
@@ -537,7 +541,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 更新时间
             const dateElement = sayElement.querySelector('.say-date');
             dateElement.setAttribute('data-timestamp', updatedAt);
-            dateElement.textContent = new Date(updatedAt * 1000).toLocaleString('sv-SE').replace('T', ' ');
+            dateElement.textContent = new Date(updatedAt * 1000).toLocaleString('zh-CN').replace('T', ' ');
             
             // 更新来源
             const sourceElement = sayElement.querySelector('.source-text');
@@ -614,7 +618,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const say = data.data;
                 // 填充编辑表单
                 editContentTextarea.value = say.content;
-                editTimeInput.value = new Date(say.updated_at * 1000).toLocaleString('sv-SE').replace('T', ' ');
+                editTimeInput.value = new Date(say.updated_at * 1000).toLocaleString('zh-CN').replace('T', ' ');
                 editAgentInput.value = say.agent || '';
                 editSayIdInput.value = sayId;
                 
@@ -642,6 +646,16 @@ document.addEventListener('DOMContentLoaded', function() {
             showMessage('说说内容不能为空', 'error', editMessageContainer);
             return;
         }
+
+        // 这里判定一下时间格式
+        const localDate = new Date(customTime); 
+        if (isNaN(localDate.getTime())) {
+            showMessage('时间格式不正确', 'error', editMessageContainer);
+            return;
+        }
+
+        // 转换为 UTC 时间字符串（格式：YYYY-MM-DDTHH:MM:SSZ，Z 表示 UTC）
+        const utcTimeStr = localDate.toISOString();
         
         // 禁用按钮
         saveEditBtn.classList.add('operating');
@@ -652,7 +666,7 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('do', 'edit');
         formData.append('id', sayId);
         formData.append('content', content);
-        formData.append('custom_time', customTime);
+        formData.append('custom_time', utcTimeStr);
         formData.append('custom_agent', customAgent);
         
         fetch(window.location.href, {
