@@ -18,7 +18,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * 
  * @package Says
  * @author 猫东东
- * @version 1.2.3
+ * @version 1.2.4
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
 class Plugin implements PluginInterface {
@@ -39,7 +39,52 @@ class Plugin implements PluginInterface {
         // 创建数据表
         try {
             $db = Db::get();
-            $db->query("CREATE TABLE IF NOT EXISTS `{$db->getPrefix()}says` (
+            
+            // 检查表是否已经存在
+            $prefix = $db->getPrefix();
+            $tableName = $prefix . 'says';
+            $adapterName = get_class($db->getAdapter());
+            
+            try {
+                if (strpos($adapterName, 'SQLite') !== false) {
+                    // SQLite
+                    $tables = $db->fetchAll($db->query("SELECT name FROM sqlite_master WHERE type='table' AND name = '{$tableName}'"));
+                } else {
+                    // MySQL
+                    $tables = $db->fetchAll($db->query("SHOW TABLES LIKE '{$tableName}'"));
+                }
+                if (!empty($tables)) {
+                    return _t('说说插件数据表已存在，跳过创建。');
+                }
+            } catch (\Exception $e) {
+                // 如果查询失败，继续创建表
+            }
+            
+            // 检测数据库类型
+            $adapterName = get_class($db->getAdapter());
+            
+            // SQLite
+            if (strpos($adapterName, 'SQLite') !== false) {
+                $db->query("CREATE TABLE IF NOT EXISTS " . $db->getPrefix() . "says (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 0,
+                    content TEXT NOT NULL,
+                    agent TEXT DEFAULT NULL,
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    status INTEGER NOT NULL DEFAULT 1,
+                    uuid VARCHAR(36) NOT NULL,
+                    ip VARCHAR(50) DEFAULT NULL,
+                    source VARCHAR(255) DEFAULT NULL
+                )");
+                // 创建索引
+                $db->query("CREATE UNIQUE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_uuid ON " . $db->getPrefix() . "says (uuid)");
+                $db->query("CREATE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_status ON " . $db->getPrefix() . "says (status)");
+                $db->query("CREATE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_created_at ON " . $db->getPrefix() . "says (created_at)");
+            } 
+            // MySQL
+            else {
+                $db->query("CREATE TABLE IF NOT EXISTS `{$db->getPrefix()}says` (
                     `id` int(11) NOT NULL AUTO_INCREMENT,
                     `user_id` int(11) NOT NULL DEFAULT 0,
                     `content` text NOT NULL,
@@ -54,8 +99,8 @@ class Plugin implements PluginInterface {
                     UNIQUE KEY `uuid` (`uuid`),
                     KEY `status` (`status`),
                     KEY `created_at` (`created_at`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
-            );
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            }
         } catch (\Exception $e) {
             throw new PluginException('数据表创建失败: ' . $e->getMessage());
         }
@@ -79,18 +124,31 @@ class Plugin implements PluginInterface {
         // 移除后台菜单和操作
         Helper::removePanel(3, 'Says/Manage.php');
         Helper::removeAction('says-manage');
-        // 可选：禁用时删除数据表
-        // 如果你希望在禁用插件时删除数据表，可以取消以下注释
-        /*
-        try {
-            $db = Db::get();
-            $tableName = $db->getPrefix() . 'says';
-            $db->query("DROP TABLE IF EXISTS `{$tableName}`");
-            return _t('说说插件已禁用，数据表已删除。');
-        } catch (\Exception $e) {
-            throw new PluginException('数据表删除失败: ' . $e->getMessage());
+        
+        // 检查是否需要删除数据表
+        $options = Helper::options()->plugin('Says');
+        if ($options->deleteTable) {
+            try {
+                $db = Db::get();
+                $tableName = $db->getPrefix() . 'says';
+                
+                // 根据数据库类型删除表和索引
+                $adapterName = get_class($db->getAdapter());
+                if (strpos($adapterName, 'SQLite') !== false) {
+                    // SQLite需要先删除索引
+                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_uuid");
+                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_status");
+                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_created_at");
+                }
+                // 删除表
+                $db->query("DROP TABLE IF EXISTS `{$tableName}`");
+                return _t('说说插件已禁用，数据表已删除。');
+            } catch (\Exception $e) {
+                throw new PluginException('数据表删除失败: ' . $e->getMessage());
+            }
         }
-        */
+        
+        return _t('说说插件已禁用。');
     }
 
      /**
@@ -134,6 +192,16 @@ class Plugin implements PluginInterface {
             _t('如果所有的都没匹配到，则显示这个默认来源，可选值：直接留空:不显示来源 1:显示操作系统 2:显示浏览器 3:操作系统+浏览器，如果要显示自定义，直接 填写自定义内容')
         );
         $form->addInput($defaultSource);
+
+        // 是否在禁用插件时删除数据表
+        $deleteTable = new Radio(
+            'deleteTable',
+            ['1' => _t('是'), '0' => _t('否')],
+            '0',
+            _t('禁用插件时是否删除数据表'),
+            _t('如果选择是，在禁用插件时会删除插件创建的数据表。请谨慎选择！')
+        );
+        $form->addInput($deleteTable);
     }
 
     /**

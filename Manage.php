@@ -34,8 +34,29 @@ $user->pass('administrator');
 $notice = Widget::widget('Widget_Notice');
 
 // 创建表结构检查
-if (!$db->fetchRow($db->query("SHOW TABLES LIKE '{$db->getPrefix()}says'"))) {
-    $notice->set(_t('说说数据表不存在，请禁用后重新启用插件'), 'error');
+try {
+    $prefix = $db->getPrefix();
+    $tableName = $prefix . 'says';
+    $adapterName = get_class($db->getAdapter());
+    
+    // 检查表是否存在
+    if (strpos($adapterName, 'SQLite') !== false) {
+        // SQLite
+        $tables = $db->fetchAll($db->select('name')
+            ->from('sqlite_master')
+            ->where("type = 'table' AND name = ?", $tableName));
+    } else {
+        // MySQL
+        $tables = $db->fetchAll($db->query("SHOW TABLES LIKE '{$tableName}'")); // MySQL的LIKE语句不支持参数绑定
+    }
+    
+    if (empty($tables)) {
+        $notice->set(_t('说说数据表不存在，请禁用后重新启用插件'), 'error');
+        include 'footer.php';
+        exit;
+    }
+} catch (\Exception $e) {
+    $notice->set(_t('检查数据表失败：' . $e->getMessage()), 'error');
     include 'footer.php';
     exit;
 }
