@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS {{prefix}}says (
     uuid VARCHAR(36) NOT NULL,
     ip VARCHAR(50) DEFAULT NULL,
     source VARCHAR(255) DEFAULT NULL,
+    position VARCHAR(255) DEFAULT NULL,
     CONSTRAINT says_uuid_unique UNIQUE (uuid),
     CONSTRAINT says_status_created_at_idx CHECK (status BETWEEN 0 AND 1)
 );

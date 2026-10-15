@@ -14,6 +14,9 @@ use Utils\Helper;
 // 防止直接运行
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
+// 引入公共函数
+require_once 'function.php';
+
 /**
  * 用于typecho的说说插件
  * 
@@ -57,7 +60,7 @@ class Plugin implements PluginInterface {
         // 获取当前目录
         $dir = dirname(__FILE__);
         // 获取当前目录下sql下的对应文件
-        $sqlfile =  $dir . '/sql/' . strtolower($adapterName) . '.sql';
+        $sqlfile =  $dir . '/sql/' . $adapterName . '.sql';
         // 判定有没有对应的数据表文件，如果没有直接抛出异常
         if (!file_exists($sqlfile)) throw new PluginException('缺少必要的SQL文件，请检查插件目录下的sql文件夹是否存在。' . $sqlfile);
         // 读取SQL文件内容并替换前缀
@@ -69,6 +72,8 @@ class Plugin implements PluginInterface {
         foreach (splitSqlStatements($sql) as $statement) {
             $db->query($statement);
         }
+        // 从1.0升级2.0时，要做的事情
+        self::upgrade($adapterName, $db);
         // 返回成功信息
         return _t('说说插件激活成功!数据表已创建。');
     }
@@ -253,5 +258,35 @@ class Plugin implements PluginInterface {
         echo '<script src="' . $js . '"></script>';
         // 创建一个MemoLoader对象
         echo '<script>document.addEventListener("DOMContentLoaded", function(){ const memoLoader = new MemoLoader({memos: "' . $url . '", limit: ' . $perPage . ', domId: "' . $dom . '"});});</script>';
+    }
+    /**
+     * 升级插件时的操作
+     * @param string $adapterName 数据库适配器名称
+     * @param Db $db 数据库连接对象
+     */
+    public static function upgrade(string $adapterName, Db $db): void {
+        // 判定says表中是否存在 position和client字段，如果没有则添加
+        $column = 'position';
+        // 不同数据库的查询语句不同
+        if ($adapterName === 'mysql') {
+            // 获取现有的列名
+            $result = $db->fetchAll('SHOW COLUMNS FROM `' . $db->getPrefix() . 'says`');
+            // 提取列名
+            $existingColumns = array_column($result, 'Field');
+            // 判断是否已经存在该列，不存在则添加
+            if (!in_array($column, $existingColumns)) $db->query('ALTER TABLE `' . $db->getPrefix() . 'says` ADD COLUMN `' . $column . '` VARCHAR(255) DEFAULT NULL');
+        } elseif ($adapterName === 'sqlite') {
+            // SQLite使用PRAGMA table_info来获取表结构
+            $result = $db->fetchAll('PRAGMA table_info(`' . $db->getPrefix() . 'says`)');
+            // 提取列名
+            $existingColumns = array_column($result, 'name');
+            // 判断是否已经存在该列，不存在则添加
+            if (!in_array($column, $existingColumns))  $db->query('ALTER TABLE ' . $db->getPrefix() . 'says ADD COLUMN ' . $column . ' VARCHAR(255) DEFAULT NULL');
+        } elseif ($adapterName === 'pgsql') {
+            // PostgreSQL使用information_schema.columns来获取表结构
+            $result = $db->fetchAll("SELECT column_name FROM information_schema.columns WHERE table_name='" . $db->getPrefix() . "says' AND column_name='" . $column . "'");
+            // 判断是否已经存在该列，不存在则添加
+            if (empty($result)) $db->query('ALTER TABLE "' . $db->getPrefix() . 'says" ADD COLUMN "' . $column . '" VARCHAR(255) DEFAULT NULL');
+        }
     }
 }

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS {{prefix}}says (
     status INTEGER NOT NULL DEFAULT 1,
     uuid VARCHAR(36) NOT NULL,
     ip VARCHAR(50) DEFAULT NULL,
-    source VARCHAR(255) DEFAULT NULL
+    source VARCHAR(255) DEFAULT NULL,
+    position VARCHAR(255) DEFAULT NULL,
 );
 CREATE UNIQUE INDEX IF NOT EXISTS {{prefix}}says_uuid ON {{prefix}}says (uuid);
 CREATE INDEX IF NOT EXISTS {{prefix}}says_status ON {{prefix}}says (status);

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}says` (
     `uuid` varchar(36) NOT NULL,
     `ip` varchar(50) DEFAULT NULL,
     `source` varchar(255) DEFAULT NULL,
+    `position` varchar(255) DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uuid` (`uuid`),
     KEY `status` (`status`),
