@@ -259,15 +259,17 @@ class MemoLoader {
         for (let i = 0; i < data.length; i++) {
             const memo = data[i];
             const content = marked.parse(memo.content);
-            const from = memo.from || "火星";
+            const from = memo.from || "";
+            const position = memo.position || "";
             const timestamp = this.formatTime(memo.updated_at);
             html += `<div class="says-card">
                 <div class="says-content">${content}</div>
                 <div class="says-footer">
                     <div class="meta datatime" data-value="${memo.updated_at}">${timestamp}</div>
             `;
-            // 如果没有from就不显示
+            // 来源 / 位置,空值不渲染
             if (from) html += `<div class="meta from">---来自「${from}」</div>`;
+            if (position) html += `<div class="meta position">📍 ${position}</div>`;
             // 继续
             html += `</div></div>`;
         }

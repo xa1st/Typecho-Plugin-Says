@@ -106,7 +106,8 @@ class Action extends Widget {
                     'content' => $memo['content'],
                     'created_at' => intval($memo['created_at']),
                     'updated_at' => intval($memo['updated_at']),
-                    'from' => getPlatform($memo['agent']),
+                    'from' => !empty($memo['source']) ? trim($memo['source']) : getPlatform($memo['agent']),
+                    'position' => $memo['position'] ?? '',
                     'attachments' => $attachmentList
                 ];
             }
@@ -201,6 +202,10 @@ class Action extends Widget {
             if (!$valid) return $this->response->throwJson(['status' => 0, 'message' => $message]);
             // 当前时间
             $currentTime = time();
+            // 来源:API可传 source,未传则按UA识别一次并落库(与后台一致)
+            $customSource = isset($data['source']) ? trim((string)$data['source']) : '';
+            // 位置:API可传 position,未传则置空
+            $customPosition = isset($data['position']) ? trim((string)$data['position']) : '';
             // 插入数据库
             $insertId = $this->db->query($this->db->insert($this->saysTable)->rows([
                 'uuid' => generateUUID(),
@@ -208,6 +213,8 @@ class Action extends Widget {
                 'content' => $content,
                 'agent' => $agent, // 直接加在ua里,把来源
                 'ip' => $this->request->getIp() ?? '0.0.0.0',
+                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'position' => $customPosition !== '' ? $customPosition : null,
                 'status' => (strtoupper($data['visibility'] ?? 'public') === 'PUBLIC') ? 1 : 0,
                 'created_at' => $currentTime,
                 'updated_at' => $currentTime

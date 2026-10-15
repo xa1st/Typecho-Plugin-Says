@@ -42,38 +42,19 @@ class Plugin implements PluginInterface {
         // 获取所有标签
         Helper::addRoute('says_tags', '/memos/api/v1/tags', '\TypechoPlugin\Says\Action', 'getTags');
         // 后台管理相关
-        Helper::addPanel(3, 'Says/Manage.php', _t('说说'), _t('管理你的说说'), 'administrator');
+        Helper::addPanel(2, 'Says/Manage.php', _t('发布说说'), _t('管理你的说说'), 'administrator');
         // 后台管理页面
         Helper::addAction('says-manage', '\TypechoPlugin\Says\Manage');
         // 获取数据库连接
         $db = Db::get();
-        // 读取当前数据库的适配器类型
-        $adapter = $db->getAdapterName();
-        // 默认为空
-        $adapterName = '';
-        // 判断适配器类型
-        if (strpos($adapter, 'Mysql') !== false) $adapterName = 'mysql';
-        if (strpos($adapter, 'SQLite') !== false) $adapterName = 'sqlite';
-        if (strpos($adapter, 'PostgreSQL') !== false) $adapterName = 'pgsql';
-        // 如果没有适配器类型，抛出异常
-        if (!$adapterName) throw new PluginException('不支持的数据库类型: ' . $adapter);
-        // 获取当前目录
-        $dir = dirname(__FILE__);
-        // 获取当前目录下sql下的对应文件
-        $sqlfile =  $dir . '/sql/' . $adapterName . '.sql';
-        // 判定有没有对应的数据表文件，如果没有直接抛出异常
-        if (!file_exists($sqlfile)) throw new PluginException('缺少必要的SQL文件，请检查插件目录下的sql文件夹是否存在。' . $sqlfile);
-        // 读取SQL文件内容并替换前缀
-        $sql = file_get_contents($sqlfile);
-        // 替换前缀
-        $sql = str_replace('{{prefix}}', $db->getPrefix(), $sql);
-        // Typecho的Db适配器(Mysqli/Pdo/SQLite)均不支持一次执行多条语句,
-        // 需将SQL文件拆分为单条语句逐条执行(见function.php的splitSqlStatements)
-        foreach (splitSqlStatements($sql) as $statement) {
-            $db->query($statement);
+        try {
+            // 运行安装的SQL文件
+            self::runSql($db, 'install');
+            // 激活时补全缺失列(兼容老版本升级)
+            self::upgrade($db);
+        } catch (PluginException $e) {
+            throw new PluginException('说说插件激活失败: ' . $e->getMessage());
         }
-        // 从1.0升级2.0时，要做的事情
-        self::upgrade($adapterName, $db);
         // 返回成功信息
         return _t('说说插件激活成功!数据表已创建。');
     }
@@ -92,33 +73,21 @@ class Plugin implements PluginInterface {
         Helper::removeRoute('says_auth');
         Helper::removeRoute('says_create');
         Helper::removeRoute('says_upload_attachment');
+        Helper::removeRoute('says_tags');
         // 移除后台菜单和操作
-        Helper::removePanel(3, 'Says/Manage.php');
+        Helper::removePanel(2, 'Says/Manage.php');
         Helper::removeAction('says-manage');
         
         // 检查是否需要删除数据表
         $options = Helper::options()->plugin('Says');
+        // 如果选择了删除数据表，则执行删除操作
         if ($options->deleteTable) {
             try {
-                $db = Db::get();
-                $tableName = $db->getPrefix() . 'says';
-                
-                // 根据数据库类型删除表和索引
-                $adapterName = get_class($db->getAdapter());
-                if (strpos($adapterName, 'SQLite') !== false) {
-                    // SQLite需要先删除索引
-                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_uuid");
-                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_status");
-                    $db->query("DROP INDEX IF EXISTS " . $db->getPrefix() . "says_created_at");
-                }
-                // 删除表
-                $db->query("DROP TABLE IF EXISTS `{$tableName}`");
-                return _t('说说插件已禁用，数据表已删除。');
-            } catch (\Exception $e) {
-                throw new PluginException('数据表删除失败: ' . $e->getMessage());
+                self::runSql(Db::get(), 'remove');
+            } catch (PluginException $e) {
+                return _t('说说插件已禁用，但删除数据表失败: ' . $e->getMessage());
             }
         }
-        
         return _t('说说插件已禁用。');
     }
 
@@ -137,12 +106,12 @@ class Plugin implements PluginInterface {
         $form->addInput($isOpen);
 
         // 用于访问的令牌
-        $token = new Text('token', null, '', _t('API访问令牌'), _t('用于API接口认证的令牌，建议使用32位以上的随机字符串'));
+        $token = new Textarea('token', null, '', _t('用户id和API访问令牌每行1个，格式 id|token'), _t('用于API接口认证的用户ID和对应令牌，令牌建议使用32位以上的随机字符串'));
         $form->addInput($token);
 
         // 用于发说说的用户id
-        $userId = new Text('userId', null, '', _t('用户ID'), _t('用于API接口认证的用户ID，请填写用户ID，非用户名'));
-        $form->addInput($userId);
+        // $userId = new Text('userId', null, '', _t('用户ID'), _t('用于API接口认证的用户ID，请填写用户ID，非用户名'));
+        // $form->addInput($userId);
 
         // 图床管理
         $storage = new Select(
@@ -259,15 +228,17 @@ class Plugin implements PluginInterface {
         // 创建一个MemoLoader对象
         echo '<script>document.addEventListener("DOMContentLoaded", function(){ const memoLoader = new MemoLoader({memos: "' . $url . '", limit: ' . $perPage . ', domId: "' . $dom . '"});});</script>';
     }
+
     /**
      * 升级插件时的操作
-     * @param string $adapterName 数据库适配器名称
      * @param Db $db 数据库连接对象
      */
-    public static function upgrade(string $adapterName, Db $db): void {
+    public static function upgrade(Db $db): void {
         // 判定says表中是否存在 position和client字段，如果没有则添加
         $column = 'position';
         // 不同数据库的查询语句不同
+        $adapterName = self::getAdapterName($db);
+        // 获取现有的列名
         if ($adapterName === 'mysql') {
             // 获取现有的列名
             $result = $db->fetchAll('SHOW COLUMNS FROM `' . $db->getPrefix() . 'says`');
@@ -288,5 +259,65 @@ class Plugin implements PluginInterface {
             // 判断是否已经存在该列，不存在则添加
             if (empty($result)) $db->query('ALTER TABLE "' . $db->getPrefix() . 'says" ADD COLUMN "' . $column . '" VARCHAR(255) DEFAULT NULL');
         }
+    }
+
+    /**
+     * 运行SQL文件的方法
+     * @param Db $db 数据库连接对象
+     * @param string $action 执行的动作，'install'或'remove'
+     */
+    private static function runSql(Db $db, string $action): void {
+        try {
+            // 读取当前数据库的适配器类型
+            $adapterName = self::getAdapterName($db);
+            // 根据动作获取对应的SQL文件名
+            $sqlfilename = '';
+            // 根据动作获取对应的SQL文件名，不能用三元运算符，因为要抛出异常
+            if ($action === 'install') {
+                // 获取当前目录下 sql 下的安装文件
+                $sqlfilename = strtolower($adapterName) . '.sql';
+            } elseif ($action === 'remove') {
+                // 获取当前目录下 sql 下的删除文件
+                $sqlfilename = strtolower($adapterName) . '_remove.sql';
+            } else {
+                throw new PluginException('未知的动作 - ' . $action);
+            }
+            // 获取当前目录下 sql 下的删除文件
+            $sqlfile = dirname(__FILE__) . '/sql/' . $sqlfilename;
+            // 缺文件则直接返回
+            if (!file_exists($sqlfile)) throw new PluginException($sqlfile . ' 文件不存在');
+            // 读取SQL文件内容并替换前缀
+            $sql = file_get_contents($sqlfile);
+            // 替换前缀
+            $sql = str_replace('{{prefix}}', $db->getPrefix(), $sql);
+            // 逐条执行(与安装脚本同一处理逻辑)
+            foreach (splitSqlStatements($sql) as $statement)  $db->query($statement);
+        } catch (PluginException $e) {
+            throw new PluginException('执行SQL文件失败: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 获取当前数据库适配器名称
+     * @param Db $db 数据库连接对象
+     * @return string 数据库适配器名称
+     */
+    private static function getAdapterName(Db $db): string {
+        // 默认为空
+        $adapterName = '';
+        // 获取当前数据库的适配器类型
+        $adapter = $db->getAdapterName();
+        // 判断适配器类型
+        if (strpos($adapter, 'Mysql') !== false) {
+            $adapterName = 'mysql'; // mysql
+        } elseif (strpos($adapter, 'SQLite') !== false) {
+            $adapterName = 'sqlite'; // sqlite
+        } elseif (strpos($adapter, 'PostgreSQL') !== false) {
+            $adapterName = 'pgsql'; // postgresql
+        }
+        // 如果没有适配器类型,直接跳过删除,不阻断禁用流程
+        if (!$adapterName) throw new PluginException('不支持的数据库类型: ' . $adapter);
+        // 返回适配器名称
+        return $adapterName;
     }
 }

@@ -86,6 +86,10 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             $currentTime = time();
             // 获取UA
             $agent = $request->getAgent();
+            // 发布时的来源:手填值优先,留空则按UA自动识别一次并落库(/编辑同理)
+            $customSource = trim($request->get('source', ''));
+            // 位置:可留空
+            $position = trim($request->get('position', ''));
             // 插入数据库
             $lastInsertId = $db->query($db->insert('table.says')->rows([
                 'uuid' => generateUUID(),
@@ -93,6 +97,8 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                 'content' => $content,
                 'agent' => $agent,
                 'ip' => $request->getIp() ?? '0.0.0.0',
+                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'position' => $position !== '' ? $position : null,
                 'status' => $status,
                 'created_at' => $currentTime,
                 'updated_at' => $currentTime,
@@ -107,7 +113,11 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             }
             // 解析内容中的 #标签 并关联
             \TypechoPlugin\Says\Hashtag::relate((int)$lastInsertId, \TypechoPlugin\Says\Hashtag::extract($content));
-            $response = ['status' => 1, 'message' => '发布成功', 'data' => ['id' => $lastInsertId, 'source' => getPlatform($agent)]];
+            $response = ['status' => 1, 'message' => '发布成功', 'data' => [
+                'id' => $lastInsertId,
+                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'position' => $position !== '' ? $position : '',
+            ]];
         } catch (\Exception $e) {
             $response = ['status' => 0, 'message' => '发布失败: ' . $e->getMessage()];
         }
@@ -194,8 +204,8 @@ if ($request->isPost() && $request->get('ajax') == 1) {
         $id = intval($request->get('id', 0));
         $content = trim($request->get('content', ''));
         $customTime = trim($request->get('custom_time', ''));
-        $customAgent = trim($request->get('custom_agent', ''));
-        $customIp = trim($request->get('custom_ip', ''));
+        $customSource = trim($request->get('custom_source', ''));
+        $customPosition = trim($request->get('custom_position', ''));
         
         try {
             if ($id <= 0) throw new \Exception('无效的ID');
@@ -218,16 +228,16 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                 }
             }
             
-            // 处理 User Agent
-            $agent = !empty($customAgent) ? $customAgent : $originalSay['agent'];
-            // 处理 IP
-            $ip = !empty($customIp) ? $customIp : ($originalSay['ip'] ?? '');
+            // 处理来源:手填值优先,留空则按 UA 重新识别并落库
+            $source = $customSource !== '' ? $customSource : getPlatform($originalSay['agent'] ?? '');
+            // 处理位置:手填值优先,留空则清空
+            $position = $customPosition !== '' ? $customPosition : null;
             
             // 更新数据库
             $db->query($db->update('table.says')->rows([
                 'content' => $content,
-                'agent' => $agent,
-                'ip' => $ip,
+                'source' => $source,
+                'position' => $position,
                 'updated_at' => $updatedAt,
             ])->where('id = ?', $id));
             
@@ -245,10 +255,9 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             $response = ['status' => 1, 'message' => '修改成功', 'data' => [
                 'id' => $id,
                 'content' => $content,
-                'agent' => $agent,
-                'ip' => $ip,
+                'source' => $source,
+                'position' => $position,
                 'updated_at' => $updatedAt,
-                'source' => getPlatform($agent)
             ]];
         } catch (\Exception $e) {
             $response = ['status' => 0, 'message' => '修改失败: ' . $e->getMessage()];
@@ -353,6 +362,11 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                 <input type="file" id="image-input" accept="image/*" multiple style="display: none;" />
                             </div>
                         </div>
+                        <!-- 来源 / 位置(发布时可选,留空自动识别来源) -->
+                        <div class="says-publish-fields">
+                            <input type="text" id="publish-source" class="text-s" placeholder="<?php _e('来源(客户端),留空自动识别'); ?>" />
+                            <input type="text" id="publish-position" class="text-s" placeholder="<?php _e('位置,可留空'); ?>" />
+                        </div>
                         <div id="message-container" style="margin-top: 10px; display: none;"></div>
                             <!-- 未使用附件暂存区 -->
                             <div id="unused-attachments" class="says-unused">
@@ -397,11 +411,11 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                             <div id="edit-attachments" class="says-unused"></div>
                         </div>
                         
-                        <!-- 时间 / UA / IP(第二行,各占1/3) -->
+                        <!-- 时间 / 来源 / 位置(第二行,各占1/3) -->
                         <div class="says-edit-fields">
                             <input type="text" id="edit-time" name="edit-time" class="text-s" placeholder="<?php _e('更新时间,留空则当前时间'); ?>" />
-                            <input type="text" id="edit-agent" name="edit-agent" class="text-s" placeholder="<?php _e('User Agent,留空则保持原有值'); ?>" />
-                            <input type="text" id="edit-ip" name="edit-ip" class="text-s" placeholder="<?php _e('IP地址,留空则保持原有值'); ?>" />
+                            <input type="text" id="edit-source" name="edit-source" class="text-s" placeholder="<?php _e('来源(客户端),留空则按UA自动识别'); ?>" />
+                            <input type="text" id="edit-position" name="edit-position" class="text-s" placeholder="<?php _e('位置,留空则清空'); ?>" />
                         </div>
                         
                         <div id="edit-message-container" style="margin-top: 10px; display: none;"></div>
@@ -436,8 +450,11 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                     <div class="say-content" data-raw-content="<?php echo htmlspecialchars($say['content']); ?>"></div>
                                     <div class="say-meta">
                                         <span class="say-source"><?php _e('ID'); ?>: <?php echo $say['id']; ?></span>
-                                        <?php $from = getPlatform($say['agent']); ?>
+                                        <?php $from = !empty($say['source']) ? trim($say['source']) : getPlatform($say['agent']); ?>
                                         <span class="say-source"><?php _e('来源'); ?>: <span class="source-text"><?php echo empty($from) ? '本站' : trim($from); ?></span></span>
+                                        <?php if (!empty($say['position'])): ?>
+                                        <span class="say-source"><?php _e('位置'); ?>: <?php echo htmlspecialchars($say['position']); ?></span>
+                                        <?php endif; ?>
                                         <span class="say-date" data-timestamp="<?php echo $say['updated_at']; ?>"></span>
                                     </div>
                                 </div>
@@ -630,7 +647,17 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 .says-edit-attachments-row .says-unused {
     margin-top: 0;
 }
-/* 编辑框:时间 / UA / IP(第二行,各占1/3) */
+/* 发布框:来源 / 位置(各占1/2) */
+.says-publish-fields {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+}
+.says-publish-fields input {
+    flex: 1 1 0;
+    min-width: 0;
+}
+/* 编辑框:时间 / 来源 / 位置(各占1/3) */
 .says-edit-fields {
     margin-top: 10px;
     display: flex;
@@ -764,8 +791,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const editForm = document.getElementById('edit-form');
     const editContentTextarea = document.getElementById('edit-content');
     const editTimeInput = document.getElementById('edit-time');
-    const editAgentInput = document.getElementById('edit-agent');
-    const editIpInput = document.getElementById('edit-ip');
+    const editSourceInput = document.getElementById('edit-source');
+    const editPositionInput = document.getElementById('edit-position');
     const saveEditBtn = document.getElementById('save-edit-btn');
     const cancelEditBtn = document.getElementById('cancel-edit-btn');
     const editSayIdInput = document.getElementById('edit-say-id');
@@ -833,7 +860,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 添加说说到列表
-    function addSayToList(id, content, source) {
+    function addSayToList(id, content, source, position) {
         const now = new Date();
         const formattedDate = generateTime(now);
   
@@ -849,6 +876,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="say-meta">
                 <span class="say-date" data-timestamp="${Math.floor(Date.now()/1000)}">${formattedDate}</span>
                 <span class="say-source">来源: <span class="source-text">${source}</span></span>
+                ${position ? `<span class="say-source">位置: ${position}</span>` : ''}
                 <span class="say-source">说说ID: ${id}</span>
             </div>
         `;
@@ -867,7 +895,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 更新说说列表项
-    function updateSayInList(id, content, agent, updatedAt, source) {
+    function updateSayInList(id, content, updatedAt, source, position) {
         const sayElement = document.getElementById('say-' + id);
         if (sayElement) {
             // 更新内容
@@ -883,6 +911,24 @@ document.addEventListener('DOMContentLoaded', function() {
             // 更新来源
             const sourceElement = sayElement.querySelector('.source-text');
             sourceElement.textContent = source;
+            
+            // 更新位置:添加或更新位置槽
+            let posElement = sayElement.querySelector('.say-position');
+            if (position) {
+                if (!posElement) {
+                    // 在来源后插入位置槽
+                    posElement = document.createElement('span');
+                    posElement.className = 'say-source say-position';
+                    if (sourceElement && sourceElement.closest('.say-meta')) {
+                        sourceElement.insertAdjacentElement('afterend', posElement);
+                    } else {
+                        sayElement.querySelector('.say-meta').appendChild(posElement);
+                    }
+                }
+                posElement.textContent = '位置: ' + position;
+            } else if (posElement) {
+                posElement.remove();
+            }
         }
     }
 
@@ -1134,6 +1180,13 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('do', 'publish');
         formData.append('content', content);
         formData.append('userId', '<?php echo $userId; ?>');
+        // 发布时的来源/位置(可留空,服务端留空时自动识别来源)
+        const publishSourceInput = document.getElementById('publish-source');
+        const publishPositionInput = document.getElementById('publish-position');
+        const publishSource = publishSourceInput ? publishSourceInput.value.trim() : '';
+        const publishPosition = publishPositionInput ? publishPositionInput.value.trim() : '';
+        if (publishSource) formData.append('source', publishSource);
+        if (publishPosition) formData.append('position', publishPosition);
         // 附带待关联的附件 id(本地上传暂存区,从hidden输入框读取)
         const selectedAttachmentIds = getHiddenIds(publishIdsInput);
         if (selectedAttachmentIds.length > 0) {
@@ -1159,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 已关联的附件从暂存区移除(避免一直挂在发布框下方)
                 clearStagedAttachments(selectedAttachmentIds);
                 // 添加到列表
-                addSayToList(data.data.id, content, data.data.source);
+                addSayToList(data.data.id, content, data.data.source, data.data.position || '');
             } else {
                 // 失败
                 showMessage(data.message || '发布失败', 'error');
@@ -1364,9 +1417,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 填充编辑表单
                 editContentTextarea.value = say.content;
                 editTimeInput.value = new Date(say.updated_at * 1000).toLocaleString('zh-CN').replace('T', ' ');
-                editAgentInput.value = say.agent || '';
-                // 填充 IP(服务端返回 'ip',历史数据可能为空)
-                editIpInput.value = say.ip || '';
+                // 来源:预填库中现有值(可能因历史数据为空)
+                editSourceInput.value = say.source || '';
+                // 位置:预填库中现有值
+                editPositionInput.value = say.position || '';
                 editSayIdInput.value = sayId;
                 
                 // 清空编辑框hidden输入框(编辑时新上传的附件从空开始)
@@ -1415,8 +1469,8 @@ document.addEventListener('DOMContentLoaded', function() {
     saveEditBtn.addEventListener('click', function() {
         const content = editContentTextarea.value.trim();
         const customTime = editTimeInput.value.trim();
-        const customAgent = editAgentInput.value.trim();
-        const customIp = editIpInput.value.trim();
+        const customSource = editSourceInput.value.trim();
+        const customPosition = editPositionInput.value.trim();
         const sayId = editSayIdInput.value;
         
         if (!content) {
@@ -1447,8 +1501,8 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('id', sayId);
         formData.append('content', content);
         formData.append('custom_time', utcTimeStr);
-        formData.append('custom_agent', customAgent);
-        formData.append('custom_ip', customIp);
+        formData.append('custom_source', customSource);
+        formData.append('custom_position', customPosition);
         // 附带编辑时新上传的附件 id(从编辑框hidden输入框读取)
         const editUploadedIds = getHiddenIds(editIdsInput);
         if (editUploadedIds.length > 0) {
@@ -1468,7 +1522,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.status === 1) {
                 showMessage('修改成功', 'success');
                 // 更新列表中的项目
-                updateSayInList(sayId, content, data.data.agent, data.data.updated_at, data.data.source);
+                updateSayInList(sayId, content, data.data.updated_at, data.data.source, data.data.position || '');
                 // 编辑框已关联的附件:清空hidden输入框(编辑区条目随表单隐藏,下次打开重新渲染)
                 editIdsInput.value = '';
                 // 隐藏编辑表单并恢复原卡片
