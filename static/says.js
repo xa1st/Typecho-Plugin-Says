@@ -38,7 +38,31 @@ class MemoLoader {
         this.initMarkedExtensions();
         // 创建加载更多按钮
         this.createLoadButton();
+        // 注册全局标签点击回调(供渲染出的标签链接调用)
+        const self = this;
+        window.saysTagClick = function(tag) { self.filterByTag(tag); };
         // 开始加载数据
+        this.loadMemos();
+    }
+
+    /**
+     * 按标签过滤当前列表(点击标签时)
+     * @param {string} tag 标签名,空字符串表示清除过滤
+     */
+    filterByTag(tag) {
+        // 相同标签再点一次则当作清除过滤
+        if (this.state.tag === tag) tag = '';
+        // 更新状态
+        this.state.tag = tag;
+        this.state.currentPage = 1;
+        this.state.hasMore = true;
+        // 移除旧的加载按钮并重新创建(可能因上次数据加载完被移除)
+        document.querySelectorAll('.bb-container').forEach(el => el.remove());
+        this.createLoadButton();
+        // 清空列表并显示加载动画
+        this.container.innerHTML = '';
+        this.showLoader();
+        // 重新加载
         this.loadMemos();
     }
 
@@ -146,7 +170,7 @@ class MemoLoader {
                 const rule = /#([^#\s!.,;:?"'()]+)(?= )/, match = rule.exec(src);
                 if (match) return { type: "hashtag", raw: match[0], tag: match[1], tokens: [] };
             },
-            renderer: token => `<span class='tag-span'>#${token.tag}</span>`,
+            renderer: token => `<a class='tag-span' href="javascript:;" data-tag="${token.tag}" onclick="window.saysTagClick && window.saysTagClick('${token.tag}')">#${token.tag}</a>`,
         };
         marked.use({ extensions: [tagExtension] });
     }
@@ -198,7 +222,10 @@ class MemoLoader {
         if (this.state.isLoading || !this.state.hasMore) return;
         this.state.isLoading = true;
         try {
-            const url = `${this.config.memos}api/v1/memo?limit=${this.config.limit}&page=${this.state.currentPage}`;
+            // 当前激活的标签(空 = 全部)
+            const activeTag = this.state.tag || '';
+            // 拼接 URL(带标签过滤)
+            const url = `${this.config.memos}api/v1/memo?limit=${this.config.limit}&page=${this.state.currentPage}` + (activeTag ? `&tag=${encodeURIComponent(activeTag)}` : '');
             const response = await fetch(url);
             const ret = await response.json();
             const data = ret.data || [];

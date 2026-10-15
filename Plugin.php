@@ -7,6 +7,7 @@ use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Text;
 use Typecho\Widget\Helper\Form\Element\Radio;
 use Typecho\Widget\Helper\Form\Element\Textarea;
+use Typecho\Widget\Helper\Form\Element\Select;
 use Typecho\Plugin\Exception as PluginException;
 use Utils\Helper;
 
@@ -18,7 +19,8 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * 
  * @package Says
  * @author 猫东东
- * @version 1.2.5
+ * @version 2.0.0
+ * @License Mulan PSL v2
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
 class Plugin implements PluginInterface {
@@ -32,80 +34,43 @@ class Plugin implements PluginInterface {
         Helper::addRoute('says_auth', '/memos/api/v1/auth/status', '\TypechoPlugin\Says\Action', 'authStatus');
         // 发布说说
         Helper::addRoute('says_create', '/memos/api/v1/memos', '\TypechoPlugin\Says\Action', 'createMemo');
+        // 上传附件
+        Helper::addRoute('says_upload_attachment', '/memos/api/v1/attachment', '\TypechoPlugin\Says\Action', 'uploadAttachment');
+        // 获取所有标签
+        Helper::addRoute('says_tags', '/memos/api/v1/tags', '\TypechoPlugin\Says\Action', 'getTags');
         // 后台管理相关
         Helper::addPanel(3, 'Says/Manage.php', _t('说说'), _t('管理你的说说'), 'administrator');
         // 后台管理页面
         Helper::addAction('says-manage', '\TypechoPlugin\Says\Manage');
-        // 创建数据表
-        try {
-            $db = Db::get();
-            
-            // 检查表是否已经存在
-            $prefix = $db->getPrefix();
-            $tableName = $prefix . 'says';
-            $adapterName = get_class($db->getAdapter());
-            
-            try {
-                if (strpos($adapterName, 'SQLite') !== false) {
-                    // SQLite
-                    $tables = $db->fetchAll($db->query("SELECT name FROM sqlite_master WHERE type='table' AND name = '{$tableName}'"));
-                } else {
-                    // MySQL
-                    $tables = $db->fetchAll($db->query("SHOW TABLES LIKE '{$tableName}'"));
-                }
-                if (!empty($tables)) {
-                    return _t('说说插件数据表已存在，跳过创建。');
-                }
-            } catch (\Exception $e) {
-                // 如果查询失败，继续创建表
-            }
-            
-            // 检测数据库类型
-            $adapterName = get_class($db->getAdapter());
-            
-            // SQLite
-            if (strpos($adapterName, 'SQLite') !== false) {
-                $db->query("CREATE TABLE IF NOT EXISTS " . $db->getPrefix() . "says (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL DEFAULT 0,
-                    content TEXT NOT NULL,
-                    agent TEXT DEFAULT NULL,
-                    created_at INTEGER NOT NULL DEFAULT 0,
-                    updated_at INTEGER NOT NULL DEFAULT 0,
-                    status INTEGER NOT NULL DEFAULT 1,
-                    uuid VARCHAR(36) NOT NULL,
-                    ip VARCHAR(50) DEFAULT NULL,
-                    source VARCHAR(255) DEFAULT NULL
-                )");
-                // 创建索引
-                $db->query("CREATE UNIQUE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_uuid ON " . $db->getPrefix() . "says (uuid)");
-                $db->query("CREATE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_status ON " . $db->getPrefix() . "says (status)");
-                $db->query("CREATE INDEX IF NOT EXISTS " . $db->getPrefix() . "says_created_at ON " . $db->getPrefix() . "says (created_at)");
-            } 
-            // MySQL
-            else {
-                $db->query("CREATE TABLE IF NOT EXISTS `{$db->getPrefix()}says` (
-                    `id` int(11) NOT NULL AUTO_INCREMENT,
-                    `user_id` int(11) NOT NULL DEFAULT 0,
-                    `content` text NOT NULL,
-                    `agent` text DEFAULT NULL,
-                    `created_at` int(11) NOT NULL DEFAULT 0,
-                    `updated_at` int(11) NOT NULL DEFAULT 0,
-                    `status` tinyint(1) NOT NULL DEFAULT 1,
-                    `uuid` varchar(36) NOT NULL,
-                    `ip` varchar(50) DEFAULT NULL,
-                    `source` varchar(255) DEFAULT NULL,
-                    PRIMARY KEY (`id`),
-                    UNIQUE KEY `uuid` (`uuid`),
-                    KEY `status` (`status`),
-                    KEY `created_at` (`created_at`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-            }
-        } catch (\Exception $e) {
-            throw new PluginException('数据表创建失败: ' . $e->getMessage());
+        // 获取数据库连接
+        $db = Db::get();
+        // 读取当前数据库的适配器类型
+        $adapter = $db->getAdapterName();
+        // 默认为空
+        $adapterName = '';
+        // 判断适配器类型
+        if (strpos($adapter, 'Mysql') !== false) $adapterName = 'mysql';
+        if (strpos($adapter, 'SQLite') !== false) $adapterName = 'sqlite';
+        if (strpos($adapter, 'PostgreSQL') !== false) $adapterName = 'pgsql';
+        // 如果没有适配器类型，抛出异常
+        if (!$adapterName) throw new PluginException('不支持的数据库类型: ' . $adapter);
+        // 获取当前目录
+        $dir = dirname(__FILE__);
+        // 获取当前目录下sql下的对应文件
+        $sqlfile =  $dir . '/sql/' . strtolower($adapterName) . '.sql';
+        // 判定有没有对应的数据表文件，如果没有直接抛出异常
+        if (!file_exists($sqlfile)) throw new PluginException('缺少必要的SQL文件，请检查插件目录下的sql文件夹是否存在。' . $sqlfile);
+        // 读取SQL文件内容并替换前缀
+        $sql = file_get_contents($sqlfile);
+        // 替换前缀
+        $sql = str_replace('{{prefix}}', $db->getPrefix(), $sql);
+        // Typecho的Db适配器(Mysqli/Pdo/SQLite)均不支持一次执行多条语句,
+        // 需将SQL文件拆分为单条语句逐条执行(见function.php的splitSqlStatements)
+        foreach (splitSqlStatements($sql) as $statement) {
+            $db->query($statement);
         }
-        
-        return _t('说说插件激活成功！数据表已创建。');
+        // 返回成功信息
+        return _t('说说插件激活成功!数据表已创建。');
     }
 
     /**
@@ -121,6 +86,7 @@ class Plugin implements PluginInterface {
         Helper::removeRoute('says_list');
         Helper::removeRoute('says_auth');
         Helper::removeRoute('says_create');
+        Helper::removeRoute('says_upload_attachment');
         // 移除后台菜单和操作
         Helper::removePanel(3, 'Says/Manage.php');
         Helper::removeAction('says-manage');
@@ -173,6 +139,66 @@ class Plugin implements PluginInterface {
         $userId = new Text('userId', null, '', _t('用户ID'), _t('用于API接口认证的用户ID，请填写用户ID，非用户名'));
         $form->addInput($userId);
 
+        // 图床管理
+        $storage = new Select(
+            'storage',
+            ['local' => _t('本地'), 'backblaze' => _t('Backblaze B2'), 'upyun' => _t('又拍云')],
+            'local',
+            _t('图床管理'),
+            _t('请选择一个图床,用于上传图片')
+        );
+        $form->addInput($storage);
+
+        // 图床参数设置，Local直接留空
+        $storageConfig = new Textarea(
+            'storageConfig',
+            NULL,
+            '{"bucket":"", "endpoint":"", "url":"", "path": ""}',
+            _t('图床参数设置'),
+            _t('请根据所选图床的要求填写相应的参数配置，Local图床可以留空，不要写敏感信息，AK和SK直接写入config.inc.php中比较好')
+        );
+        $form->addInput($storageConfig);
+
+        // 附件存储路径
+        $storagePath = new Text(
+            'storagePath',
+            NULL,
+            'Y/md',
+            _t('附件存储路径'),
+            _t('请填写附件子目录格式,仅支持PHP的date()格式符,例如:Y/md(Y年/md月日),只用date格式符,不支持自定义英文目录。Local图床固定存放在站点usr/uploads目录下,存储路径为其下的子目录;云图床则是存储桶内的路径')
+        );
+        $form->addInput($storagePath);
+
+        // 文件重命名规则
+        $fileNewName = new Select(
+            'fileNewName',
+            ['uuid' => _t('UUID'), 'unique' => _t('唯一ID')],
+            'uuid',
+            _t('文件重命名规则'),
+            _t('选择上传文件的重命名规则')
+        );
+        $form->addInput($fileNewName);
+
+        // 最大上传文件大小
+        $maxFileSize = new Text(
+            'maxFileSize',
+            NULL,
+            '2',
+            _t('最大上传文件大小'),
+            _t('请填写最大上传文件大小，单位是：M，例如：2表示2M，留空表示不限制大小')
+        );
+        $form->addInput($maxFileSize);
+
+        // 可上传文件类型
+        $allowedFileTypes = new Textarea(
+            'allowedFileTypes',
+            NULL,
+            'jpg,jpeg,png,gif,webp,avif',
+            _t('可上传文件类型'),
+            _t('请填写可上传的文件类型，多个类型用逗号分隔，例如：jpg,jpeg,png,gif')
+        );
+        $form->addInput($allowedFileTypes);
+
         // 小尾巴设置
         $platform = new Textarea(
             'platform',
@@ -217,13 +243,13 @@ class Plugin implements PluginInterface {
         // 获取插件URL
         $pluginUrl = Helper::options()->pluginUrl . '/Says';
         // 加载样式
-        $css = $config['css'] ?? $pluginUrl . '/static/says.css?ver=' . time();
+        $css = $config['css'] ?? $pluginUrl . '/static/says.css';
         echo '<link rel="stylesheet" href="' . $css . '"/>';
         // 加载markdown库
         $markdown = $config['markdown'] ?? $pluginUrl . '/static/markd.min.js';
         echo '<script src="' . $markdown . '"></script>';
         // 加载说说用的js
-        $js = $config['js'] ?? $pluginUrl . '/static/says.min.js?ver=' . time();
+        $js = $config['js'] ?? $pluginUrl . '/static/says.min.js';
         echo '<script src="' . $js . '"></script>';
         // 创建一个MemoLoader对象
         echo '<script>document.addEventListener("DOMContentLoaded", function(){ const memoLoader = new MemoLoader({memos: "' . $url . '", limit: ' . $perPage . ', domId: "' . $dom . '"});});</script>';
