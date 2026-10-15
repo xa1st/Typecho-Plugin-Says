@@ -238,8 +238,7 @@ function getPlatform($agent = '') {
  * @param string $sql 原始SQL脚本内容
  * @return array 单条SQL语句列表(已trim,不含空语句)
  */
-function splitSqlStatements(string $sql): array
-{
+function splitSqlStatements(string $sql): array {
     // 语句列表
     $statements = [];
     // 当前累积的语句
@@ -276,8 +275,7 @@ function splitSqlStatements(string $sql): array
  * @param string $fallbackExt 文件名无扩展名时的兜底扩展名
  * @return string 目标路径,不含前导斜杠
  */
-function generateTargetPath(string $filename, string $fallbackExt = 'bin'): string
-{
+function generateTargetPath(string $filename, string $fallbackExt = 'bin'): string {
     // 插件配置
     $options = \Utils\Helper::options()->plugin('Says');
     // 存储路径规则,默认 Y/md,参考 PHP date 函数
@@ -312,8 +310,7 @@ function generateTargetPath(string $filename, string $fallbackExt = 'bin'): stri
  * 
  * @return array 扩展名数组,如 ['jpg', 'jpeg', 'png']
  */
-function getAllowedFileTypes(): array
-{
+function getAllowedFileTypes(): array {
     // 插件配置
     $options = \Utils\Helper::options()->plugin('Says');
     // 配置值,默认常见图片类型

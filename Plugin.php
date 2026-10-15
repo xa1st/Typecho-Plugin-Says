@@ -109,9 +109,25 @@ class Plugin implements PluginInterface {
         $token = new Textarea('token', null, '', _t('用户id和API访问令牌每行1个，格式 id|token'), _t('用于API接口认证的用户ID和对应令牌，令牌建议使用32位以上的随机字符串'));
         $form->addInput($token);
 
-        // 用于发说说的用户id
-        // $userId = new Text('userId', null, '', _t('用户ID'), _t('用于API接口认证的用户ID，请填写用户ID，非用户名'));
-        // $form->addInput($userId);
+        // 小尾巴设置
+        $platform = new Textarea(
+            'platform',
+            NULL,
+            _t("绿泡泡 V\\\\1||MicroMessenger\/(.*?)\(\n全能的Windows||Windows精致的MacOS||Mac\n肾疼的IPhone||iPhone\n泡面盖子IPad||iPad\n曾经卡死的Android||Android\n真正的神Linux||Linux"),
+            _t('来源名称'),
+            _t('要识别的小尾巴，格式 [要显示的名称]||[要包含的字符串]，多个小尾巴用换行分隔，例如：Chrome浏览器|Chrome/，优先级从上往下')
+        );
+        $form->addInput($platform);
+
+        // 默认来源
+        $defaultSource = new Text(
+            'defaultSource',
+            NULL,
+            '',
+            _t('默认来源'),
+            _t('如果所有的都没匹配到，则显示这个默认来源，可选值：直接留空:不显示来源 1:显示操作系统 2:显示浏览器 3:操作系统+浏览器，如果要显示自定义，直接 填写自定义内容')
+        );
+        $form->addInput($defaultSource);
 
         // 图床管理
         $storage = new Select(
@@ -164,7 +180,7 @@ class Plugin implements PluginInterface {
         $form->addInput($maxFileSize);
 
         // 可上传文件类型
-        $allowedFileTypes = new Textarea(
+        $allowedFileTypes = new Text(
             'allowedFileTypes',
             NULL,
             'jpg,jpeg,png,gif,webp,avif',
@@ -172,26 +188,6 @@ class Plugin implements PluginInterface {
             _t('请填写可上传的文件类型，多个类型用逗号分隔，例如：jpg,jpeg,png,gif')
         );
         $form->addInput($allowedFileTypes);
-
-        // 小尾巴设置
-        $platform = new Textarea(
-            'platform',
-            NULL,
-            _t("绿泡泡 V\\\\1||MicroMessenger\/(.*?)\(\n全能的Windows||Windows精致的MacOS||Mac\n肾疼的IPhone||iPhone\n泡面盖子IPad||iPad\n曾经卡死的Android||Android\n真正的神Linux||Linux"),
-            _t('来源名称'),
-            _t('要识别的小尾巴，格式 [浏览器名称]||[要包含的字符串]，多个小尾巴用换行分隔，例如：Chrome浏览器|Chrome/，优先级从上往下')
-        );
-        $form->addInput($platform);
-
-        // 默认来源
-        $defaultSource = new Text(
-            'defaultSource',
-            NULL,
-            '',
-            _t('默认来源'),
-            _t('如果所有的都没匹配到，则显示这个默认来源，可选值：直接留空:不显示来源 1:显示操作系统 2:显示浏览器 3:操作系统+浏览器，如果要显示自定义，直接 填写自定义内容')
-        );
-        $form->addInput($defaultSource);
 
         // 是否在禁用插件时删除数据表
         $deleteTable = new Radio(

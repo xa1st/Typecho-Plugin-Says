@@ -72,8 +72,8 @@ if ($request->isPost() && $request->get('ajax') == 1) {
     if ($act == 'publish') {
         // 获取说说内容
         $content = trim($request->get('content', ''));
-        // 获取用户ID
-        $userId = $pluginOptions->userId ? $pluginOptions->userId : $user->uid;
+        // 后台发布:使用当前登录用户作为作者
+        $userId = $user->uid;
         // 状态
         $status = (strtoupper($request->get('visibility', 'PUBLIC')) === 'PUBLIC') ? 1 : 0;
         // 入库
@@ -335,8 +335,8 @@ function pageUrl($page) {
     return $options->adminUrl . 'extending.php?panel=Says/Manage.php&page=' . $page;
 }
 
-// 获取用户ID(优先使用插件配置的用户ID)
-$userId = isset($pluginOptions->userId) && !empty($pluginOptions->userId) ?  $pluginOptions->userId : $user->uid;
+// 获取用户ID(后台发布默认使用当前登录用户)
+$userId = $user->uid;
 
 // 获取未使用的附件(暂存区,显示在发表框下方)
 $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);

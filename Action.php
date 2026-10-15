@@ -153,20 +153,18 @@ class Action extends Widget {
         // 如果插件停用，直接返回404
         if (!$this->options->isOpen) throw new Exception(_t('接口不存在'), 404);
         try {
-            // 获取 token
-            $token = $this->getAuthToken();
-            // 登陆失败
-            if (!$token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
-            // 验证 token
-            if ($token !== $this->options->token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
+            // 获取 token 并反查对应用户(多用户+多令牌)
+            $userId = $this->resolveCurrentUser();
+            // 鉴权失败
+            if (!$userId) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
             // 返回用户信息
-            $user = $this->db->fetchRow($this->db->select('screenName', 'mail')->from($this->db->getPrefix() . 'users')->where('uid = ?', $this->options->userId));
+            $user = $this->db->fetchRow($this->db->select('screenName', 'mail')->from($this->db->getPrefix() . 'users')->where('uid = ?', $userId));
             // 用户不存在则抛出错误
             if (!$user) $this->response->throwJson(['status' => 0, 'message' => _t('指定的说说用户不存在.')]);
             // 生成头像URL (使用Gravatar)
             $avatarUrl = __TYPECHO_GRAVATAR_PREFIX__ . md5(strtolower(trim($user['mail']))) . '?s=64&d=identicon';
             // 返回数据
-            $this->response->throwJson(['id' => $this->options->userId, 'nickname' => $user['screenName'], 'avatar' => $avatarUrl]);
+            $this->response->throwJson(['id' => $userId, 'nickname' => $user['screenName'], 'avatar' => $avatarUrl]);
         } catch (\Exception $e) {
             // 抛出错误
             $this->response->throwJson(['status' => 0, 'message' => 'Internal server error: ' . $e->getMessage()]);
@@ -182,12 +180,10 @@ class Action extends Widget {
         // 如果插件停用，直接返回404
         if (!$this->options->isOpen) throw new Exception(_t('接口不存在'), 404);
         try {
-            // 获取 token
-            $token = $this->getAuthToken();
-            // 登陆失败
-            if (!$token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
-            // 验证 token
-            if ($token !== $this->options->token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
+            // 获取 token 并反查对应用户(多用户+多令牌)
+            $userId = $this->resolveCurrentUser();
+            // 鉴权失败
+            if (!$userId) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
             // 获取 JSON 请求数据
             $data = json_decode(file_get_contents('php://input'), true);
             // 验证 JSON 解析是否成功
@@ -209,7 +205,7 @@ class Action extends Widget {
             // 插入数据库
             $insertId = $this->db->query($this->db->insert($this->saysTable)->rows([
                 'uuid' => generateUUID(),
-                'user_id' => $this->options->userId,
+                'user_id' => $userId,
                 'content' => $content,
                 'agent' => $agent, // 直接加在ua里,把来源
                 'ip' => $this->request->getIp() ?? '0.0.0.0',
@@ -270,12 +266,10 @@ class Action extends Widget {
         // 如果插件停用,直接返回404
         if (!$this->options->isOpen) throw new Exception(_t('接口不存在'), 404);
         try {
-            // 获取 token
-            $token = $this->getAuthToken();
-            // 登陆失败
-            if (!$token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
-            // 验证 token
-            if ($token !== $this->options->token) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
+            // 获取 token 并反查对应用户(多用户+多令牌)
+            $userId = $this->resolveCurrentUser();
+            // 鉴权失败
+            if (!$userId) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
             // 获取 JSON 请求数据
             $data = json_decode(file_get_contents('php://input'), true);
             // 验证 JSON 解析是否成功
@@ -353,5 +347,44 @@ class Action extends Widget {
         $authorization = $this->request->getHeader('Authorization');
         // 返回 Token
         return $authorization ? str_replace('Bearer ', '', $authorization) : '';
+    }
+
+    /**
+     * 解析当前请求对应的用户ID(多用户+多令牌)
+     *
+     * 从 Authorization 头取 Bearer Token,与插件设置中的令牌表比对。
+     * 令牌表配置格式:每行一个,形如 用户ID|令牌(如 1|abc123...)
+     * 令牌比对前会 trim,忽略首尾空白。
+     *
+     * @return int|null 匹配到的用户ID,未匹配返回 null
+     */
+    private function resolveCurrentUser(): ?int {
+        // 获取令牌
+        $token = $this->getAuthToken();
+        // 空令牌直接失败
+        if (!$token) return null;
+        // 读取配置中的多行令牌表
+        $lines = explode("\n", (string)$this->options->token);
+        // 逐行比对
+        foreach ($lines as $line) {
+            // 去除首尾空白
+            $line = trim($line);
+            // 跳过空行
+            if ($line === '') continue;
+            // 拆分为 id|令牌
+            $parts = explode('|', $line, 2);
+            // 格式不完整则跳过
+            if (count($parts) !== 2) continue;
+            // 用户ID
+            $uid = (int)trim($parts[0]);
+            // 令牌
+            $lineToken = trim($parts[1]);
+            // 用户ID有效且令牌匹配(trim后比对)
+            if ($uid > 0 && $lineToken === trim($token)) {
+                return $uid;
+            }
+        }
+        // 未匹配
+        return null;
     }
 }
