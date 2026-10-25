@@ -22,7 +22,7 @@ require_once 'function.php';
  * 
  * @package Says
  * @author 猫东东
- * @version 2.0.0
+ * @version 2.1.0
  * @License Mulan PSL v2
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
