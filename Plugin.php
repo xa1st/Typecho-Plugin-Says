@@ -219,7 +219,7 @@ class Plugin implements PluginInterface {
         $markdown = $config['markdown'] ?? $pluginUrl . '/static/markd.min.js';
         echo '<script src="' . $markdown . '"></script>';
         // 加载说说用的js
-        $js = $config['js'] ?? $pluginUrl . '/static/says.min.js';
+        $js = $config['js'] ?? $pluginUrl . '/static/says.js';
         echo '<script src="' . $js . '"></script>';
         // 创建一个MemoLoader对象
         echo '<script>document.addEventListener("DOMContentLoaded", function(){ const memoLoader = new MemoLoader({memos: "' . $url . '", limit: ' . $perPage . ', domId: "' . $dom . '"});});</script>';

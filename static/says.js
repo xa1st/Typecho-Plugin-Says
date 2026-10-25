@@ -160,7 +160,7 @@ class MemoLoader {
             return `<a class="primary" href="${href.href}" target="_blank">${href.text}</a>`;
         };
         // 渲染Markdown
-        marked.setOptions({renderer: renderer, breaks: false, smartypants: false, langPrefix: "language-", headerIds: false, mangle: FinalizationRegistry});
+        marked.setOptions({renderer: renderer, breaks: false, smartypants: false, langPrefix: "language-", headerIds: false, mangle: false});
         // 标签扩展
         const tagExtension = {
             name: "hashtag",
