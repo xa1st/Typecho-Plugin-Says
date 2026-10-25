@@ -17,6 +17,8 @@ class MemoLoader {
         };
         // 状态参数
         this.state = {currentPage: 1, isLoading: false, hasMore: true };
+        // 附件映射:原图 URL → 缩图/大图(渲染当前说说前重建,供图片渲染器查询)
+        this.attMap = {};
         // DOM元素
         this.container = null;
         this.loadButton = null;
@@ -41,6 +43,12 @@ class MemoLoader {
         // 注册全局标签点击回调(供渲染出的标签链接调用)
         const self = this;
         window.saysTagClick = function(tag) { self.filterByTag(tag); };
+        // 图片点击放大:委托监听,点击说说内容里的图片弹出灯箱看大图
+        this.container.addEventListener("click", (e) => {
+            const img = e.target.closest(".says-content img");
+            if (!img) return;
+            this.openLightbox(img.getAttribute("data-large") || img.src);
+        });
         // 开始加载数据
         this.loadMemos();
     }
@@ -67,6 +75,23 @@ class MemoLoader {
     }
 
     /**
+     * 极简灯箱:全屏遮罩看大图,点击任意处关闭
+     * @param {string} url 大图地址
+     */
+    openLightbox(url) {
+        // 移除已有遮罩
+        document.querySelector(".says-lightbox")?.remove();
+        // 构建遮罩
+        const mask = document.createElement("div");
+        mask.className = "says-lightbox";
+        mask.innerHTML = `<img src="${url}" alt="">`;
+        // 点击任意处关闭
+        mask.addEventListener("click", () => mask.remove());
+        // 加入页面
+        document.body.appendChild(mask);
+    }
+
+    /**
      * 显示加载器
      */
     showLoader() {
@@ -87,9 +112,13 @@ class MemoLoader {
         const renderer = new marked.Renderer();
         // 自定义图片解析
         renderer.image = (href) => {
-            // console.log(href);
-            // 渲染图片为带有特定类名和属性的div结构，以适应特定的样式和功能需求
-            return `<img class="thumb" src="${href.href}" title="${href.text}' alt='${href.text}"/>`;
+            // 查当前说说的附件映射:命中用缩图显示,点击看大图;未命中(外链图/旧数据)直接用原图
+            const att = this.attMap && this.attMap[href.href];
+            // 显示地址与点击大图地址
+            const src = att ? att.thumb : href.href;
+            const large = att ? att.large : href.href;
+            // 渲染图片:大图地址放 data-large,供灯箱读取
+            return `<img class="thumb" src="${src}" data-large="${large}" title="${href.text}" alt="${href.text}"/>`;
         };
         // 自定义链接渲染
         renderer.link = (href) => {
@@ -258,6 +287,11 @@ class MemoLoader {
         let html = "";
         for (let i = 0; i < data.length; i++) {
             const memo = data[i];
+            // 重建当前说说的附件映射:原图 URL → 缩图/大图(旧数据无 thumb/large 时回退原图)
+            this.attMap = {};
+            (memo.attachments || []).forEach(att => {
+                if (att && att.url) this.attMap[att.url] = { thumb: att.thumb || att.url, large: att.large || att.url };
+            });
             const content = marked.parse(memo.content);
             const from = memo.from || "";
             const position = memo.position || "";

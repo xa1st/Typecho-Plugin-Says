@@ -3,7 +3,9 @@
 .says-card .says-footer{display: flex;justify-content: space-between;align-items:center;border-top: #EEE solid 1px;padding: 1rem 0 0;font-size: .875rem;}
 .says-card .says-content .tag-span{color: #3354AA}
 .says-card .says-footer .meta.position{color:#999}
-.says-card .says-content .thumb{max-width:100%;height:auto;margin: .5rem auto}
+.says-card .says-content .thumb{max-width:100%;height:auto;margin: .5rem auto;cursor: zoom-in}
+.says-lightbox{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+.says-lightbox img{max-width:92%;max-height:92%;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .says-card .says-content .bilivideo {position: relative; width: 100%; height: 100%;padding-bottom: 55%}
 .says-card .says-content .bilivideo iframe{position: absolute;width: 100%; height: 100%;}
 .says-card .says-content .douban-card{display: flex;align-items: center; position: relative; box-shadow: 0 0 2px 0 rgba(0, 0, 0, 0.3); padding:0.5rem; margin: 1rem auto}

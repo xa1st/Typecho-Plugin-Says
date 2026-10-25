@@ -95,6 +95,8 @@ class Action extends Widget {
                     $attachmentList[] = [
                         'id' => (int)$att['id'],
                         'url' => $att['url'],
+                        'thumb' => !empty($att['thumb']) ? $att['thumb'] : $att['url'],
+                        'large' => !empty($att['large']) ? $att['large'] : $att['url'],
                         'name' => $att['name'],
                         'size' => (int)$att['size'],
                         'mime' => $att['mime'],
