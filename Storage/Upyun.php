@@ -18,6 +18,9 @@ use Typecho\Http\Client;
  *
  * 认证方式:Authorization: Upyun <operator>:<md5(password)>
  * 公共逻辑(base64 落盘 / MIME / 尺寸 / MD5)见 Storage 基类。
+ * 缩图为参数模式:不生成本地缩图文件,直接在访问 URL 上拼接又拍云图片处理参数,
+ * 由又拍云按需生成并边缘缓存(前提:空间已开通图片处理功能,参数不对或未开通会 404)。
+ * 删除时无缩图文件需要处理。
  * 密钥来源:config.inc.php 中定义 SAYS_UPYUN_OPERATOR / SAYS_UPYUN_PASSWORD
  */
 class Upyun extends Storage
@@ -26,6 +29,16 @@ class Upyun extends Storage
      * 又拍云默认 API 端点
      */
     private const DEFAULT_ENDPOINT = 'https://v0.api.upyun.com';
+
+    /**
+     * 小图处理参数:等比限入 200 见方(前端按 100px 显示,高分屏按 2x 取图)
+     */
+    private const THUMB_PARAMS = '!/fw/200/fh/200';
+
+    /**
+     * 大图处理参数:宽压到 1920
+     */
+    private const LARGE_PARAMS = '!/fw/1920';
 
     /**
      * 空间名称
@@ -92,14 +105,28 @@ class Upyun extends Storage
     }
 
     /**
+     * 缩图模式:参数模式(URL 拼处理参数,由又拍云按需生成,无需本地缩图文件)
+     *
+     * @return string 'param'
+     */
+    public function thumbMode(): string {
+        // 参数模式
+        return 'param';
+    }
+
+    /**
      * 真正上传到又拍云
+     *
+     * 缩图为参数模式:只传原图,缩图/大图在访问 URL 上拼图片处理参数。
+     * GIF 动图与非图片不拼参数(保动画完整/处理无意义),直接用原图地址。
      *
      * @param string $filePath 本地文件路径(基类已就绪)
      * @param string $target 目标路径/文件名
-     * @return array 附件表特有字段(storage/url/remark)
+     * @param array|null $thumbs 参数模式忽略该参数(与物理存储保持签名一致)
+     * @return array 附件表特有字段(storage/url/remark/thumb/large)
      * @throws \Exception
      */
-    protected function doUpload(string $filePath, string $target): array {
+    protected function doUpload(string $filePath, string $target, ?array $thumbs = null): array {
         // 读取文件内容
         $data = file_get_contents($filePath);
         // 读取失败
@@ -110,17 +137,38 @@ class Upyun extends Storage
         $code = $this->request('PUT', $url, $data);
         // 非 2xx 视为失败
         if ($code < 200 || $code >= 300) throw new \Exception('又拍云上传失败,HTTP ' . $code);
+        // 原图访问地址
+        $origin = $this->getUrl($target);
+        // 缩图/大图 URL(默认与原图一致,下面按文件信息决定是否拼处理参数)
+        $thumb = $origin;
+        // 大图 URL
+        $large = $origin;
+        // 读取图片基础信息(宽高/MIME,非图片时返回 false)
+        $info = @getimagesize($filePath);
+        // 是图片且非 GIF 动图才拼参数
+        if ($info !== false && ($info['mime'] ?? '') !== 'image/gif') {
+            // 小图:等比限入 200 见方
+            $thumb = $origin . self::THUMB_PARAMS;
+            // 大图:宽超 1920 才拼参数(参数按存储像素处理,无需考虑 EXIF 方向)
+            if ((int)$info[0] > self::LARGE_WIDTH) {
+                $large = $origin . self::LARGE_PARAMS;
+            }
+        }
         // 返回存储特有字段(公共字段 name/size/mime/md5 由基类填充)
         return [
             'storage' => 'upyun',
-            'url'     => $this->getUrl($target),
-            // 删除时用:空间内文件路径
+            'url'     => $origin,
+            'thumb'   => $thumb,
+            'large'   => $large,
+            // 删除时用:空间内文件路径(缩图为参数模式,无物理文件,无需记录)
             'remark'  => json_encode(['bucket'   => $this->bucket, 'filePath' => $target], JSON_UNESCAPED_UNICODE),
         ];
     }
 
     /**
      * 删除又拍云中的文件
+     *
+     * 缩图为参数模式(无物理文件),只需删除原图。
      *
      * @param array $attachment 附件表完整行(remark 中包含 filePath)
      * @return bool 是否删除成功
