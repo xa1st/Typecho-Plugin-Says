@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS {{prefix}}says_attachment (
     storage VARCHAR(32) NOT NULL,
     num INTEGER DEFAULT NULL,
     url TEXT NOT NULL,
+    thumb TEXT DEFAULT NULL,
+    large TEXT DEFAULT NULL,
     size INTEGER DEFAULT NULL,
     mime VARCHAR(128) DEFAULT NULL,
     md5 VARCHAR(32) DEFAULT NULL,

@@ -226,35 +226,76 @@ class Plugin implements PluginInterface {
     }
 
     /**
-     * 升级插件时的操作
+     * 升级插件时的操作(激活时补全缺失列,兼容老版本升级)
      * @param Db $db 数据库连接对象
      */
     public static function upgrade(Db $db): void {
-        // 判定says表中是否存在 position和client字段，如果没有则添加
-        $column = 'position';
-        // 不同数据库的查询语句不同
+        // 获取当前数据库的适配器类型
         $adapterName = self::getAdapterName($db);
-        // 获取现有的列名
-        if ($adapterName === 'mysql') {
+        // 待补全的列:表名(不带前缀) => [列名 => 列类型定义]
+        $columns = [
+            // 说说表:发布位置(2.0 新增)
+            'says' => [
+                'position' => 'VARCHAR(255) DEFAULT NULL',
+            ],
+            // 附件表:缩图/大图地址(2.1 新增,无对应缩图时与 url 保持一致)
+            'says_attachment' => [
+                'thumb' => 'TEXT DEFAULT NULL',
+                'large' => 'TEXT DEFAULT NULL',
+            ],
+        ];
+        // 逐表检查补全
+        foreach ($columns as $table => $cols) {
+            // 完整表名
+            $tableName = $db->getPrefix() . $table;
             // 获取现有的列名
-            $result = $db->fetchAll('SHOW COLUMNS FROM `' . $db->getPrefix() . 'says`');
-            // 提取列名
-            $existingColumns = array_column($result, 'Field');
-            // 判断是否已经存在该列，不存在则添加
-            if (!in_array($column, $existingColumns)) $db->query('ALTER TABLE `' . $db->getPrefix() . 'says` ADD COLUMN `' . $column . '` VARCHAR(255) DEFAULT NULL');
-        } elseif ($adapterName === 'sqlite') {
-            // SQLite使用PRAGMA table_info来获取表结构
-            $result = $db->fetchAll('PRAGMA table_info(`' . $db->getPrefix() . 'says`)');
-            // 提取列名
-            $existingColumns = array_column($result, 'name');
-            // 判断是否已经存在该列，不存在则添加
-            if (!in_array($column, $existingColumns))  $db->query('ALTER TABLE ' . $db->getPrefix() . 'says ADD COLUMN ' . $column . ' VARCHAR(255) DEFAULT NULL');
-        } elseif ($adapterName === 'pgsql') {
-            // PostgreSQL使用information_schema.columns来获取表结构
-            $result = $db->fetchAll("SELECT column_name FROM information_schema.columns WHERE table_name='" . $db->getPrefix() . "says' AND column_name='" . $column . "'");
-            // 判断是否已经存在该列，不存在则添加
-            if (empty($result)) $db->query('ALTER TABLE "' . $db->getPrefix() . 'says" ADD COLUMN "' . $column . '" VARCHAR(255) DEFAULT NULL');
+            $existingColumns = self::getTableColumns($db, $adapterName, $tableName);
+            // 逐列判断,不存在则添加
+            foreach ($cols as $column => $definition) {
+                // 已存在跳过
+                if (in_array($column, $existingColumns)) continue;
+                // 不同数据库的补列语句写法不同
+                if ($adapterName === 'mysql') {
+                    $db->query('ALTER TABLE `' . $tableName . '` ADD COLUMN `' . $column . '` ' . $definition);
+                } elseif ($adapterName === 'sqlite') {
+                    $db->query('ALTER TABLE ' . $tableName . ' ADD COLUMN ' . $column . ' ' . $definition);
+                } else {
+                    $db->query('ALTER TABLE "' . $tableName . '" ADD COLUMN "' . $column . '" ' . $definition);
+                }
+            }
         }
+        // 回填附件缩图字段:老数据没有缩图,先与原图 url 保持一致,保证字段永远有值(前端零回退逻辑)
+        $attachmentTable = $db->getPrefix() . 'says_attachment';
+        // 按适配器选择表名引号
+        $quoted = $adapterName === 'mysql' ? '`' . $attachmentTable . '`' : ($adapterName === 'pgsql' ? '"' . $attachmentTable . '"' : $attachmentTable);
+        // 执行回填(已是新数据的行不受影响)
+        $db->query('UPDATE ' . $quoted . ' SET thumb = url, large = url WHERE thumb IS NULL');
+    }
+
+    /**
+     * 获取表的现有列名
+     * @param Db $db 数据库连接对象
+     * @param string $adapterName 适配器名称
+     * @param string $tableName 完整表名(带前缀)
+     * @return array 列名列表
+     */
+    private static function getTableColumns(Db $db, string $adapterName, string $tableName): array {
+        // MySQL 用 SHOW COLUMNS
+        if ($adapterName === 'mysql') {
+            $result = $db->fetchAll('SHOW COLUMNS FROM `' . $tableName . '`');
+            // 提取列名
+            return array_column($result, 'Field');
+        }
+        // SQLite 用 PRAGMA table_info
+        if ($adapterName === 'sqlite') {
+            $result = $db->fetchAll('PRAGMA table_info(`' . $tableName . '`)');
+            // 提取列名
+            return array_column($result, 'name');
+        }
+        // PostgreSQL 用 information_schema
+        $result = $db->fetchAll("SELECT column_name FROM information_schema.columns WHERE table_name='" . $tableName . "'");
+        // 提取列名
+        return array_column($result, 'column_name');
     }
 
     /**
@@ -308,8 +349,8 @@ class Plugin implements PluginInterface {
             $adapterName = 'mysql'; // mysql
         } elseif (strpos($adapter, 'SQLite') !== false) {
             $adapterName = 'sqlite'; // sqlite
-        } elseif (strpos($adapter, 'PostgreSQL') !== false) {
-            $adapterName = 'pgsql'; // postgresql
+        } elseif (strpos($adapter, 'PostgreSQL') !== false || strpos($adapter, 'PgSQL') !== false) {
+            $adapterName = 'pgsql'; // postgresql(Typecho 适配器名为 PgSQL / Pdo_PgSQL)
         }
         // 如果没有适配器类型,直接跳过删除,不阻断禁用流程
         if (!$adapterName) throw new PluginException('不支持的数据库类型: ' . $adapter);
