@@ -36,11 +36,6 @@ class Upyun extends Storage
     private const THUMB_PARAMS = '!/fw/200/fh/200';
 
     /**
-     * 大图处理参数:宽压到 1920
-     */
-    private const LARGE_PARAMS = '!/fw/1920';
-
-    /**
      * 空间名称
      *
      * @var string
@@ -117,16 +112,16 @@ class Upyun extends Storage
     /**
      * 真正上传到又拍云
      *
-     * 缩图为参数模式:只传原图,缩图/大图在访问 URL 上拼图片处理参数。
+     * 缩图为参数模式:只传原图,缩图在访问 URL 上拼图片处理参数。
      * GIF 动图与非图片不拼参数(保动画完整/处理无意义),直接用原图地址。
      *
      * @param string $filePath 本地文件路径(基类已就绪)
      * @param string $target 目标路径/文件名
-     * @param array|null $thumbs 参数模式忽略该参数(与物理存储保持签名一致)
-     * @return array 附件表特有字段(storage/url/remark/thumb/large)
+     * @param array|null $thumb 参数模式忽略该参数(与物理存储保持签名一致)
+     * @return array 附件表特有字段(storage/url/remark/thumb)
      * @throws \Exception
      */
-    protected function doUpload(string $filePath, string $target, ?array $thumbs = null): array {
+    protected function doUpload(string $filePath, string $target, ?array $thumb = null): array {
         // 读取文件内容
         $data = file_get_contents($filePath);
         // 读取失败
@@ -139,27 +134,20 @@ class Upyun extends Storage
         if ($code < 200 || $code >= 300) throw new \Exception('又拍云上传失败,HTTP ' . $code);
         // 原图访问地址
         $origin = $this->getUrl($target);
-        // 缩图/大图 URL(默认与原图一致,下面按文件信息决定是否拼处理参数)
-        $thumb = $origin;
-        // 大图 URL
-        $large = $origin;
+        // 缩图 URL(默认与原图一致,下面按文件信息决定是否拼处理参数)
+        $thumbUrl = $origin;
         // 读取图片基础信息(宽高/MIME,非图片时返回 false)
         $info = @getimagesize($filePath);
         // 是图片且非 GIF 动图才拼参数
         if ($info !== false && ($info['mime'] ?? '') !== 'image/gif') {
             // 小图:等比限入 200 见方
-            $thumb = $origin . self::THUMB_PARAMS;
-            // 大图:宽超 1920 才拼参数(参数按存储像素处理,无需考虑 EXIF 方向)
-            if ((int)$info[0] > self::LARGE_WIDTH) {
-                $large = $origin . self::LARGE_PARAMS;
-            }
+            $thumbUrl = $origin . self::THUMB_PARAMS;
         }
         // 返回存储特有字段(公共字段 name/size/mime/md5 由基类填充)
         return [
             'storage' => 'upyun',
             'url'     => $origin,
-            'thumb'   => $thumb,
-            'large'   => $large,
+            'thumb'   => $thumbUrl,
             // 删除时用:空间内文件路径(缩图为参数模式,无物理文件,无需记录)
             'remark'  => json_encode(['bucket'   => $this->bucket, 'filePath' => $target], JSON_UNESCAPED_UNICODE),
         ];

@@ -15,7 +15,7 @@ use Typecho\Db;
  * 负责附件表(says_attachment)和说说-附件关联表(says_attachment_meta)的读写。
  * 核心逻辑:
  *   - 上传附件:先按 (storage, md5) 预查重,命中直接复用;未命中才调存储上传
- *     (含缩图/大图生成,thumb/large 一并入库)
+ *     (含缩图生成,thumb 一并入库)
  *   - 删除附件:删关联记录,num-1,归零才真正删存储中的文件(含缩图)
  *   - 获取附件:二次查询(meta → attachment),避免 join 字段冲突
  *
@@ -93,7 +93,6 @@ class Attachment
             'num'        => 0,
             'url'        => $uploaded['url'],
             'thumb'      => $uploaded['thumb'],
-            'large'      => $uploaded['large'],
             'size'       => $uploaded['size'],
             'mime'       => $uploaded['mime'],
             'md5'        => $uploaded['md5'],

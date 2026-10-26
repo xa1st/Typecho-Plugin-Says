@@ -43,12 +43,6 @@ class MemoLoader {
         // 注册全局标签点击回调(供渲染出的标签链接调用)
         const self = this;
         window.saysTagClick = function(tag) { self.filterByTag(tag); };
-        // 图片点击放大:委托监听,点击说说内容里的图片弹出灯箱看大图
-        this.container.addEventListener("click", (e) => {
-            const img = e.target.closest(".says-content img");
-            if (!img) return;
-            this.openLightbox(img.getAttribute("data-large") || img.src);
-        });
         // 开始加载数据
         this.loadMemos();
     }
@@ -75,23 +69,6 @@ class MemoLoader {
     }
 
     /**
-     * 极简灯箱:全屏遮罩看大图,点击任意处关闭
-     * @param {string} url 大图地址
-     */
-    openLightbox(url) {
-        // 移除已有遮罩
-        document.querySelector(".says-lightbox")?.remove();
-        // 构建遮罩
-        const mask = document.createElement("div");
-        mask.className = "says-lightbox";
-        mask.innerHTML = `<img src="${url}" alt="">`;
-        // 点击任意处关闭
-        mask.addEventListener("click", () => mask.remove());
-        // 加入页面
-        document.body.appendChild(mask);
-    }
-
-    /**
      * 显示加载器
      */
     showLoader() {
@@ -112,13 +89,12 @@ class MemoLoader {
         const renderer = new marked.Renderer();
         // 自定义图片解析
         renderer.image = (href) => {
-            // 查当前说说的附件映射:命中用缩图显示,点击看大图;未命中(外链图/旧数据)直接用原图
+            // 查当前说说的附件映射:命中用缩图显示;未命中(外链图/旧数据)直接用原图
             const att = this.attMap && this.attMap[href.href];
-            // 显示地址与点击大图地址
+            // 不点击时只加载小图;点击时由 Fancybox 显示原图(原图地址放锚点 href)
             const src = att ? att.thumb : href.href;
-            const large = att ? att.large : href.href;
-            // 渲染图片:大图地址放 data-large,供灯箱读取
-            return `<img class="thumb" src="${src}" data-large="${large}" title="${href.text}" alt="${href.text}"/>`;
+            // 包一层 fancybox 锚点:按当前说说分组(渲染每条说说前更新),弹窗内只在该说说的图片间切换
+            return `<a href="${href.href}" data-fancybox="${this.galleryGroup}" data-caption="${href.text}"><img class="thumb" src="${src}" title="${href.text}" alt="${href.text}"/></a>`;
         };
         // 自定义链接渲染
         renderer.link = (href) => {
@@ -287,17 +263,33 @@ class MemoLoader {
         let html = "";
         for (let i = 0; i < data.length; i++) {
             const memo = data[i];
-            // 重建当前说说的附件映射:原图 URL → 缩图/大图(旧数据无 thumb/large 时回退原图)
+            // 重建当前说说的附件映射:原图 URL → 缩图(旧数据无 thumb 时回退原图)
             this.attMap = {};
             (memo.attachments || []).forEach(att => {
-                if (att && att.url) this.attMap[att.url] = { thumb: att.thumb || att.url, large: att.large || att.url };
+                if (att && att.url) this.attMap[att.url] = { thumb: att.thumb || att.url };
             });
+            // 当前说说的 Fancybox 分组名(用说说 uid,保证每条说说一个独立相册)
+            this.galleryGroup = "says-" + (memo.uid || i);
             const content = marked.parse(memo.content);
+            // 把内容里的图片抽出来,移到文字下方按宫格排列(微博样式)
+            // 图片 HTML 由本类渲染器生成,结构固定,按锚点整段抽取
+            const gallery = [];
+            const contentHtml = content
+                .replace(/<a href="[^"]*" data-fancybox="[^"]*"[^>]*><img[^>]*\/><\/a>/g, (m) => {
+                    gallery.push(m);
+                    return '';
+                })
+                // 清掉抽空图片后残留的空段落
+                .replace(/<p>\s*<\/p>/g, '');
+            // 宫格 HTML:单图放大显示,多图一行 3 个 100 见方
+            const galleryHtml = gallery.length
+                ? `<div class="says-gallery${gallery.length === 1 ? ' single' : ''}">${gallery.join('')}</div>`
+                : '';
             const from = memo.from || "";
             const position = memo.position || "";
             const timestamp = this.formatTime(memo.updated_at);
             html += `<div class="says-card">
-                <div class="says-content">${content}</div>
+                <div class="says-content">${contentHtml}</div>${galleryHtml}
                 <div class="says-footer">
                     <div class="meta datatime" data-value="${memo.updated_at}">${timestamp}</div>
             `;
@@ -311,8 +303,8 @@ class MemoLoader {
         const loader = this.container.querySelector(".loader");
         if (loader) loader.remove();
         this.container.insertAdjacentHTML("beforeend", `<!--说说主体开始-->${html}<!--说说主体结束-->`);
-        // 使用全局懒加载管理器处理新加载的内容
-        if (window.lazyLoadManager) window.lazyLoadManager.processImages(".says-content");
+        // 使用全局懒加载管理器处理新加载的内容(图片已移到宫格区)
+        if (window.lazyLoadManager) window.lazyLoadManager.processImages(".says-content, .says-gallery");
     }
 
     /**

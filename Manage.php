@@ -545,6 +545,8 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 .say-content {
     margin-bottom: 10px;
     word-break: break-all;
+    /* 后台列表显示原始文本,保留换行 */
+    white-space: pre-wrap;
 }
 .say-content img {
     max-width: 500px;
@@ -780,7 +782,7 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 </style>
 
 <!-- 引入JS文件 -->
-<script src="<?php $options->pluginUrl('Says/static/markd.min.js'); ?>"></script>
+<!-- 后台列表显示原始文本,不解析 markdown,不再加载 marked 库 -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const publishBtn = document.getElementById('publish-btn');
@@ -797,23 +799,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const cancelEditBtn = document.getElementById('cancel-edit-btn');
     const editSayIdInput = document.getElementById('edit-say-id');
 
-    // Markdown解析函数
-    function parseMarkdown(content) {
-        // 检查markdown库是否已加载
-        if (typeof marked !== 'undefined') return marked.parse(content);
-        // 如果库未加载，返回原始内容
-        return content; 
-    }
-
     // 解析页面中所有已有的说说内容
     function parseExistingContent() {
         // 一次性处理每个说说项目
         document.querySelectorAll('.typecho-list-table-row.say-list').forEach(function(sayRow) {
-            // 解析内容
+            // 后台列表显示原始文本(textContent 天然转义,无 XSS 风险)
             const contentElement = sayRow.querySelector('.say-content[data-raw-content]');
             if (contentElement) {
                 const rawContent = contentElement.getAttribute('data-raw-content');
-                contentElement.innerHTML = parseMarkdown(rawContent);
+                contentElement.textContent = rawContent;
             }
             // 解析时间
             const dateElement = sayRow.querySelector('.say-date[data-timestamp]');
@@ -872,7 +866,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <a href="javascript:;" data-id="${id}" class="operate-edit">编辑</a>
                 <a href="javascript:;" data-id="${id}" class="operate-delete">删除</a>
             </div>
-            <div class="say-content" data-raw-content="${content.replace(/"/g, '&quot;')}">${parseMarkdown(content)}</div>
+            <div class="say-content" data-raw-content="${content.replace(/"/g, '&quot;')}"></div>
             <div class="say-meta">
                 <span class="say-date" data-timestamp="${Math.floor(Date.now()/1000)}">${formattedDate}</span>
                 <span class="say-source">来源: <span class="source-text">${source}</span></span>
@@ -881,6 +875,9 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
   
+        // 填入原始文本(textContent 天然转义,无 XSS 风险)
+        newSay.querySelector('.say-content').textContent = content;
+
         // 检查是否有"暂无说说"的提示，如果有则移除
         const emptyNotice = saysList.querySelector('.notice');
         if (emptyNotice) {
@@ -901,7 +898,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 更新内容
             const contentElement = sayElement.querySelector('.say-content');
             contentElement.setAttribute('data-raw-content', content);
-            contentElement.innerHTML = parseMarkdown(content);
+            contentElement.textContent = content;
             
             // 更新时间
             const dateElement = sayElement.querySelector('.say-date');

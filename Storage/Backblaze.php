@@ -18,8 +18,8 @@ use Typecho\Http\Client;
  *   3. b2_delete_file_version  删除文件(需 fileName + fileId)
  *
  * 公共逻辑(base64 落盘 / MIME / 尺寸 / MD5)见 Storage。
- * 缩图支持:doUpload 可接收缩图/大图临时文件,随原图一并上传,
- * 各文件的 fileId/fileName 记入 remark 供删除;缩图上传失败不阻断原图。
+ * 缩图支持:doUpload 可接收缩图临时文件,随原图一并上传,
+ * fileId/fileName 记入 remark 供删除;缩图上传失败不阻断原图。
  * 密钥来源:config.inc.php 中定义 SAYS_B2_KEY_ID / SAYS_B2_APPLICATION_KEY
  * 需要的config字段: bucketId / bucketName / path / domain(可选)
  */
@@ -116,13 +116,12 @@ class Backblaze extends Storage {
      *
      * @param string $filePath 本地文件路径(基类已就绪)
      * @param string $target 目标路径/文件名
-     * @param array|null $thumbs 缩图任务(物理存储模式由基类传入,无缩图为 null):
-     *   ['thumb' => ['path' => 缩图临时文件, 'target' => 相对目标路径] | null,
-     *    'large' => 同上 | null]
-     * @return array 附件表特有字段(storage/url/remark/thumb/large,thumb/large 为 null 时由基类回退原图)
+     * @param array|null $thumb 缩图任务(物理存储模式由基类传入,无缩图为 null):
+     *   ['path' => 缩图临时文件, 'target' => 相对目标路径]
+     * @return array 附件表特有字段(storage/url/remark/thumb,thumb 为 null 时由基类回退原图)
      * @throws \Exception
      */
-    protected function doUpload(string $filePath, string $target, ?array $thumbs = null): array {
+    protected function doUpload(string $filePath, string $target, ?array $thumb = null): array {
         // 原图桶内完整路径(带前缀)
         $remotePath = $this->path . $target;
         // 上传原图(失败直接抛出异常,整体上传失败)
@@ -136,22 +135,20 @@ class Backblaze extends Storage {
             'uploadTimestamp' => $result['uploadTimestamp'] ?? null,
             'contentSha1'     => $result['contentSha1'] ?? null,
         ];
-        // 缩图/大图 URL(未上传或上传失败时保持 null,由基类回退原图)
-        $urls = ['thumb' => null, 'large' => null];
-        // 逐个上传缩图/大图
-        foreach (array_keys($urls) as $key) {
-            // 无该缩图任务则跳过
-            if (empty($thumbs[$key]['path'])) continue;
+        // 缩图 URL(未上传或上传失败时为 null,由基类回退原图)
+        $thumbUrl = null;
+        // 上传缩图
+        if (!empty($thumb['path'])) {
             try {
                 // 缩图桶内完整路径
-                $thumbRemote = $this->path . $thumbs[$key]['target'];
+                $thumbRemote = $this->path . $thumb['target'];
                 // 上传
-                $thumbResult = $this->uploadOne($thumbs[$key]['path'], $thumbRemote);
+                $thumbResult = $this->uploadOne($thumb['path'], $thumbRemote);
                 // 记录删除所需信息
-                $remark[$key . 'FileId'] = $thumbResult['fileId'];
-                $remark[$key . 'FileName'] = $thumbRemote;
+                $remark['thumbFileId'] = $thumbResult['fileId'];
+                $remark['thumbFileName'] = $thumbRemote;
                 // 生成访问地址
-                $urls[$key] = $this->getUrl($thumbs[$key]['target']);
+                $thumbUrl = $this->getUrl($thumb['target']);
             } catch (\Throwable $e) {
                 // 缩图上传失败不阻断主流程,前端回退原图
             }
@@ -162,9 +159,8 @@ class Backblaze extends Storage {
             'storage' => 'backblaze',
             // 文件 URL
             'url'     => $this->getUrl($target),
-            // 缩图/大图 URL
-            'thumb'   => $urls['thumb'],
-            'large'   => $urls['large'],
+            // 缩图 URL
+            'thumb'   => $thumbUrl,
             // B2 各文件的 fileId/fileName 全放 remark,删除时使用
             'remark'  => json_encode($remark, JSON_UNESCAPED_UNICODE),
         ];
@@ -174,7 +170,7 @@ class Backblaze extends Storage {
      * 删除 B2 中的文件
      *
      * 从附件行的 remark 中取 fileId + fileName 删除原图(必须成功),
-     * 缩图/大图尽力而为,失败不阻断;老数据没有缩图记录时自动跳过。
+     * 缩图尽力而为,失败不阻断;老数据没有缩图记录时自动跳过。
      *
      * @param array $attachment 附件表完整行(remark 中包含各文件的 fileId/fileName)
      * @return bool 是否删除成功
@@ -193,12 +189,9 @@ class Backblaze extends Storage {
             if ($fileId === '' || $fileName === '') return false;
             // 删除原图(必须成功)
             if (!$this->deleteFile($fileId, $fileName)) return false;
-            // 缩图/大图尽力删除,失败不阻断
-            foreach (['thumbFileId' => 'thumbFileName', 'largeFileId' => 'largeFileName'] as $idKey => $nameKey) {
-                // 无记录则跳过(老数据没有缩图)
-                if (empty($remark[$idKey])) continue;
-                // 删除
-                $this->deleteFile((string)$remark[$idKey], (string)$remark[$nameKey]);
+            // 缩图尽力删除,失败不阻断(老数据没有缩图记录则跳过)
+            if (!empty($remark['thumbFileId'])) {
+                $this->deleteFile((string)$remark['thumbFileId'], (string)$remark['thumbFileName']);
             }
             // 成功
             return true;

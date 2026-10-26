@@ -22,7 +22,7 @@ require_once 'function.php';
  * 
  * @package Says
  * @author 猫东东
- * @version 2.1.0
+ * @version 2.1.1
  * @License Mulan PSL v2
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
@@ -238,10 +238,9 @@ class Plugin implements PluginInterface {
             'says' => [
                 'position' => 'VARCHAR(255) DEFAULT NULL',
             ],
-            // 附件表:缩图/大图地址(2.1 新增,无对应缩图时与 url 保持一致)
+            // 附件表:缩图地址(2.1 新增,无缩图时与 url 保持一致)
             'says_attachment' => [
                 'thumb' => 'TEXT DEFAULT NULL',
-                'large' => 'TEXT DEFAULT NULL',
             ],
         ];
         // 逐表检查补全
@@ -265,11 +264,12 @@ class Plugin implements PluginInterface {
             }
         }
         // 回填附件缩图字段:老数据没有缩图,先与原图 url 保持一致,保证字段永远有值(前端零回退逻辑)
+        // 注:曾试用过又放弃的 large 字段如已存在于个别库中,保留无害,不做删除
         $attachmentTable = $db->getPrefix() . 'says_attachment';
         // 按适配器选择表名引号
         $quoted = $adapterName === 'mysql' ? '`' . $attachmentTable . '`' : ($adapterName === 'pgsql' ? '"' . $attachmentTable . '"' : $attachmentTable);
         // 执行回填(已是新数据的行不受影响)
-        $db->query('UPDATE ' . $quoted . ' SET thumb = url, large = url WHERE thumb IS NULL');
+        $db->query('UPDATE ' . $quoted . ' SET thumb = url WHERE thumb IS NULL');
     }
 
     /**
