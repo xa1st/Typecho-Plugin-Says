@@ -90,6 +90,8 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             $customSource = trim($request->get('source', ''));
             // 位置:可留空
             $position = trim($request->get('position', ''));
+            // 来源
+            $source = $customSource !== '' ? $customSource : trim((string)(\Utils\Helper::options()->plugin('Says')->defaultSource ?? '')); // 手填优先,留空取默认来源配置
             // 插入数据库
             $lastInsertId = $db->query($db->insert('table.says')->rows([
                 'uuid' => generateUUID(),
@@ -97,7 +99,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                 'content' => $content,
                 'agent' => $agent,
                 'ip' => $request->getIp() ?? '0.0.0.0',
-                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'source' => $source, // 来源为空就空字符串,不走 UA 识别
                 'position' => $position !== '' ? $position : null,
                 'status' => $status,
                 'created_at' => $currentTime,
@@ -129,7 +131,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             }
             $response = ['status' => 1, 'message' => '发布成功', 'data' => [
                 'id' => $lastInsertId,
-                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'source' => $source,
                 'position' => $position !== '' ? $position : '',
                 'resources' => $resources,
             ]];
@@ -168,10 +170,6 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             foreach ($files as $file) {
                 // 上传出错或没有文件则跳过
                 if (!isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK || empty($file['name'])) continue;
-                // 校验大小:最大大小配置,单位 M,留空不限
-                $maxMb = trim($pluginOptions->maxFileSize ?: '');
-                // 配置了且超限则跳过
-                if ($maxMb !== '' && $file['size'] > (int)$maxMb * 1024 * 1024) continue;
                 // 扩展名
                 $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
                 // 类型不在白名单则跳过
@@ -244,7 +242,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             }
             
             // 处理来源:手填值优先,留空则按 UA 重新识别并落库
-            $source = $customSource !== '' ? $customSource : getPlatform($originalSay['agent'] ?? '');
+            $source = $customSource !== '' ? $customSource : trim((string)(\Utils\Helper::options()->plugin('Says')->defaultSource ?? '')); // 手填优先,留空取默认来源配置
             // 处理位置:手填值优先,留空则清空
             $position = $customPosition !== '' ? $customPosition : null;
             
@@ -521,7 +519,7 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                     <?php endif; ?>
                                     <div class="say-meta" style="margin-top: 10px;border-top: 1px solid #e3e3e3;padding-top: 5px;">
                                         <span class="say-source"><?php _e('ID'); ?>: <?php echo $say['id']; ?></span>
-                                        <?php $from = !empty($say['source']) ? trim($say['source']) : getPlatform($say['agent']); ?>
+                                        <?php $from = $say['source'] ?? ''; ?>
                                         <span class="say-source"><?php _e('来源'); ?>: <span class="source-text"><?php echo empty($from) ? '本站' : trim($from); ?></span></span>
                                         <?php if (!empty($say['position'])): ?>
                                         <span class="say-source"><?php _e('位置'); ?>: <?php echo htmlspecialchars($say['position']); ?></span>

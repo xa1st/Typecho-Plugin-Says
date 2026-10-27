@@ -6,7 +6,7 @@
 > 在 Typecho 博客系统中实现类似微博的说说功能,支持API提交、后台管理和前端展示
 
 ## 当前版本
-V2.2.0
+V2.2.1
 
 ## 功能特性
 
@@ -16,7 +16,7 @@ V2.2.0
 - 🗜️ 自动生成缩略图:微博式宫格展示省流量,Fancybox 点击看原图(Imagick 优先 / GD 兜底)
 - 🔌 兼容 memos 的开放 API,可配合任意客户端远程提交(含 memos-bber 浏览器扩展)
 - 🎵 网易云音乐、Bilibili、豆瓣卡片等链接自动解析
-- 📱 来源小尾巴识别,支持自定义匹配规则
+- 📱 来源显示:取发布时手动填写的值,留空显示"本站"
 - 🗄️ 兼容 MySQL / SQLite / PostgreSQL
 
 ## 使用方法
@@ -63,10 +63,9 @@ V2.2.0
 | **是否开启API远程提交** | 关闭后只能从后台发布,相关 API 直接返回 404 |
 | **API访问令牌 / 用户ID** | API 认证凭证。令牌建议 32 位以上随机字符串(如 md5),用户ID 填 `后台 > 用户 > 管理` 中对应的 ID(非用户名) |
 | **图床管理 / 图床参数设置** | 见下方"图片/附件功能",敏感密钥不要写入此处 |
+| **默认来源** | 发布时来源留空则使用此文本作为来源;留空则不显示来源 |
 | **附件存储路径** | 仅支持 PHP `date()` 格式符,如 `Y/md` |
 | **文件重命名规则 / 最大上传文件大小 / 可上传文件类型** | 见下方"附件相关设置" |
-| **来源名称(小尾巴)** | 识别 UA 来源,格式 `名称\|要包含的字符串`,每行一个,按从上往下优先级匹配 |
-| **默认来源** | 全部小尾巴未匹配时显示:留空=不显示,1=操作系统,2=浏览器,3=操作系统+浏览器,其他=自定义文本 |
 | **禁用插件时是否删除数据表** | 谨慎选择,删除后数据不可恢复 |
 
 ## API 接口
@@ -75,16 +74,12 @@ V2.2.0
 
 | 方法 | 地址 | 说明 |
 | --- | --- | --- |
-| GET | `/memos/api/v1/memo` | 获取已发布说说列表。参数:`limit`(默认8)、`page`(默认1)、`tag`(按标签过滤)。**同路径 POST 为 memos legacy 发布**(携带 `resourceIdList`) |
+| GET | `/memos/api/v1/memo` | 获取已发布说说列表。参数:`limit`(默认8)、`page`(默认1)、`tag`(按标签过滤) |
+| POST | `/memos/api/v1/memo` | 发布说说(legacy)。JSON 参数:`content`、`visibility`(public/private)、`resourceIdList` 或 `attachmentIds`(附件 ID 数组,兼容 memos)。响应含 memos 兼容的 `memo` 实体(内附 `resources` 附件列表)。内容中可写 `[来源: xxx]` / `[位置: xxx]` 标记,自动提取到对应字段并从内容移除 |
+| POST | `/memos/api/v1/resource/blob` | 上传附件(memos legacy)。multipart 表单,字段 `file` |
+| GET | `/memos/api/v1/auth/me` | 校验令牌,返回当前用户信息(memos 0.26+ 形态) |
+| GET | `/memos/api/v1/instance/profile` | 实例信息(版本号 0.21.0,供 memos 扩展识别服务端代际) |
 | GET | `/memos/api/v1/tags` | 获取热门标签(按使用次数降序)。参数:`limit`(默认20) |
-| GET | `/memos/api/v1/auth/status` | 校验令牌并返回说说用户信息(昵称/头像) |
-| GET | `/memos/api/v1/auth/me` | memos 兼容:当前用户信息(0.26+ 形态) |
-| GET | `/memos/api/v1/instance/profile` | memos 兼容:实例信息(版本号 0.21.0,供 memos 扩展识别服务端代际) |
-| POST | `/memos/api/v1/memos` | 发布说说。JSON 参数:`content`、`visibility`(public/private)、`resourceIdList` 或 `attachmentIds`(附件 ID 数组,兼容 memos)。响应含 memos 兼容的 `memo` 实体(内附 `resources` 附件列表)。内容中可写 `[来源: xxx]` / `[位置: xxx]` 标记,自动提取到对应字段并从内容移除 |
-| POST | `/memos/api/v1/memo` | memos legacy 兼容发布(同上,单数路径) |
-| POST | `/memos/api/v1/attachment` | 上传附件(兼容 memos)。JSON 参数:`content`(文件 base64)、`filename`、`type` |
-| POST | `/memos/api/v1/attachments` | 同上(复数路径,memos 0.25+ 形态) |
-| POST | `/memos/api/v1/resource/blob` | memos legacy 兼容:multipart 附件上传,表单字段 `file` |
 
 除获取列表与标签外,其它接口都需在请求头携带令牌:
 

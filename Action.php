@@ -91,11 +91,6 @@ class Action extends Widget {
             if (!isset($file['error']) || $file['error'] !== UPLOAD_ERR_OK || empty($file['name'])) {
                 return $this->response->throwJson(['status' => 0, 'message' => '上传文件无效']);
             }
-            // 校验大小(与 base64 上传口径一致,单位 M,留空不限)
-            $maxMb = trim($this->options->maxFileSize ?: '');
-            if ($maxMb !== '' && $file['size'] > (int)$maxMb * 1024 * 1024) {
-                return $this->response->throwJson(['status' => 0, 'message' => '文件大小超过限制: ' . $maxMb . 'M']);
-            }
             // 扩展名白名单
             $fileExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
             if (!in_array($fileExt, getAllowedFileTypes())) {
@@ -195,7 +190,7 @@ class Action extends Widget {
                     'content' => $memo['content'],
                     'created_at' => intval($memo['created_at']),
                     'updated_at' => intval($memo['updated_at']),
-                    'from' => !empty($memo['source']) ? trim($memo['source']) : getPlatform($memo['agent']),
+                    'from' => !empty($memo['source']) ? trim($memo['source']) : '',
                     'position' => $memo['position'] ?? '',
                     'attachments' => $attachmentList
                 ];
@@ -270,32 +265,6 @@ class Action extends Widget {
     }
 
     /**
-     * 检查认证状态 (POST /memos/api/v1/auth/status)
-     * 参数类型 authorization: Bearer + token
-     */
-    public function authStatus() {
-        // 如果插件停用，直接返回404
-        if (!$this->options->isOpen) throw new Exception(_t('接口不存在'), 404);
-        try {
-            // 获取 token 并反查对应用户(多用户+多令牌)
-            $userId = $this->resolveCurrentUser();
-            // 鉴权失败
-            if (!$userId) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
-            // 返回用户信息
-            $user = $this->db->fetchRow($this->db->select('screenName', 'mail')->from($this->db->getPrefix() . 'users')->where('uid = ?', $userId));
-            // 用户不存在则抛出错误
-            if (!$user) $this->response->throwJson(['status' => 0, 'message' => _t('指定的说说用户不存在.')]);
-            // 生成头像URL (使用Gravatar)
-            $avatarUrl = __TYPECHO_GRAVATAR_PREFIX__ . md5(strtolower(trim($user['mail']))) . '?s=64&d=identicon';
-            // 返回数据
-            $this->response->throwJson(['id' => $userId, 'nickname' => $user['screenName'], 'avatar' => $avatarUrl]);
-        } catch (\Exception $e) {
-            // 抛出错误
-            $this->response->throwJson(['status' => 0, 'message' => 'Internal server error: ' . $e->getMessage()]);
-        }
-    }
-    
-    /**
      * 创建 Memo (POST /memos/api/v1/memo)
      * 创建一个 Memo
      * 参数类型 content: 创建内容
@@ -318,9 +287,10 @@ class Action extends Widget {
             $agent = $this->request->getAgent();
             // 从内容中提取 [来源: xxx] / [位置: xxx] 标记
             // (memos 客户端没有来源/位置参数,约定用内容标记携带;兼容全角冒号)
-            $markerSource = '';
-            $markerPosition = '';
+            $markerSource = $markerPosition = '';
+            // 提取来源标记，兼容全角冒号
             if (preg_match('/\[来源[:：]\s*([^\]]*)\]/u', $content, $mSource)) $markerSource = trim($mSource[1]);
+            // 提取位置标记，兼容全角冒号
             if (preg_match('/\[位置[:：]\s*([^\]]*)\]/u', $content, $mPos)) $markerPosition = trim($mPos[1]);
             // 内容中出现标记就一律移除(空值标记也剥掉,值视为未提供走 UA 识别)
             if (strpos($content, '[来源') !== false || strpos($content, '[位置') !== false) {
@@ -360,7 +330,7 @@ class Action extends Widget {
                 'content' => $content,
                 'agent' => $agent, // 直接加在ua里,把来源
                 'ip' => $this->request->getIp() ?? '0.0.0.0',
-                'source' => $customSource !== '' ? $customSource : getPlatform($agent),
+                'source' => $customSource ?? '', // 来源为空就空字符串,不走 UA 识别
                 'position' => $customPosition !== '' ? $customPosition : null,
                 'status' => (strtoupper($data['visibility'] ?? 'public') === 'PUBLIC') ? 1 : 0,
                 'created_at' => $currentTime,
@@ -407,89 +377,6 @@ class Action extends Widget {
                     'updated_at' => $currentTime,
                     'resources' => $resources,
                 ],
-            ]);
-        } catch (\Exception $e) {
-            // 抛出错误
-            $this->response->throwJson(['status' => 0, 'message' => 'Internal server error: ' . $e->getMessage()]);
-        }
-    }
-
-    /**
-     * 上传附件 (POST /memos/api/v1/attachment)
-     * 兼容 memos 上传接口
-     * 参数类型 {"content":"文件base64编码","filename":"文件名","type":"文件MIME如image/jpeg"}
-     * 返回 memos 兼容的附件信息
-     */
-    public function uploadAttachment() {
-        // 如果插件停用,直接返回404
-        if (!$this->options->isOpen) throw new Exception(_t('接口不存在'), 404);
-        try {
-            // 获取 token 并反查对应用户(多用户+多令牌)
-            $userId = $this->resolveCurrentUser();
-            // 鉴权失败
-            if (!$userId) $this->response->throwJson(['status' => 0, 'message' => 'Unauthorized']);
-            // 获取 JSON 请求数据
-            $data = json_decode(file_get_contents('php://input'), true);
-            // 验证 JSON 解析是否成功
-            if (!is_array($data)) return $this->response->throwJson(['status' => 0, 'message' => 'Invalid JSON data']);
-            // 获取 base64 内容
-            $content = isset($data['content']) ? trim($data['content']) : '';
-            // 获取文件名
-            $filename = isset($data['filename']) ? basename(trim($data['filename'])) : '';
-            // 获取 MIME 类型
-            $type = isset($data['type']) ? trim($data['type']) : '';
-            // 验证内容不为空
-            if (empty($content)) return $this->response->throwJson(['status' => 0, 'message' => '内容不能为空']);
-            // 验证文件名
-            if (empty($filename)) return $this->response->throwJson(['status' => 0, 'message' => '文件名不能为空']);
-            // 去掉 base64 前缀(data:image/png;base64,xxx)
-            if (strpos($content, 'base64,') !== false) {
-                // 截取逗号之后的部分
-                $content = substr($content, strpos($content, 'base64,') + 7);
-            }
-            // 校验大小:解码前估算(base64 长度 * 3/4 ≈ 解码后字节数)
-            // 最大大小配置,单位 M,留空表示不限制
-            $maxMb = trim($this->options->maxFileSize ?: '');
-            // 配置了才校验
-            if ($maxMb !== '') {
-                // 换算为字节
-                $maxBytes = (int)$maxMb * 1024 * 1024;
-                // 估算解码后大小
-                $estBytes = (int)(strlen($content) * 3 / 4);
-                // 超出上限则拒绝
-                if ($estBytes > $maxBytes) {
-                    return $this->response->throwJson(['status' => 0, 'message' => '文件大小超过限制: ' . $maxMb . 'M']);
-                }
-            }
-            // 校验文件类型(允许的类型列表)
-            $allowedTypes = getAllowedFileTypes();
-            // 取文件名扩展名
-            $fileExt = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-            // 文件名无扩展名时根据 MIME 推断
-            if (empty($fileExt)) {
-                // MIME → 扩展名 映射
-                $extMap = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp', 'image/svg+xml' => 'svg', 'image/bmp' => 'bmp'];
-                // 按 MIME 反查
-                $fileExt = $extMap[$type] ?? '';
-            }
-            // 类型不在白名单则拒绝
-            if (!in_array($fileExt, $allowedTypes)) {
-                return $this->response->throwJson(['status' => 0, 'message' => '不允许的文件类型: ' . $fileExt]);
-            }
-            // 生成存储目标路径(按配置的存储路径 + 重命名规则)
-            $target = generateTargetPath($filename, $fileExt);
-            // 上传附件(调用存储上传并登记数据库)
-            $attachment = \TypechoPlugin\Says\Attachment::upload($content, $target, true);
-            // 返回 memos 兼容的附件信息
-            $this->response->throwJson([
-                'id' => $attachment['id'],
-                'name' => 'attachments/' . $target,
-                'filename' => $filename,
-                'size' => $attachment['size'],
-                'type' => $type ?: $attachment['mime'],
-                'url' => $attachment['url'],
-                'created_at' => time(),
-                'updated_at' => time(),
             ]);
         } catch (\Exception $e) {
             // 抛出错误
