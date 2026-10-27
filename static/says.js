@@ -263,7 +263,7 @@ class MemoLoader {
         let html = "";
         for (let i = 0; i < data.length; i++) {
             const memo = data[i];
-            // 重建当前说说的附件映射:原图 URL → 缩图(旧数据无 thumb 时回退原图)
+            // 重建当前说说的附件映射:原图 URL → 缩图(旧帖内容里内嵌的图片用它换成缩略图)
             this.attMap = {};
             (memo.attachments || []).forEach(att => {
                 if (att && att.url) this.attMap[att.url] = { thumb: att.thumb || att.url };
@@ -271,31 +271,26 @@ class MemoLoader {
             // 当前说说的 Fancybox 分组名(用说说 uid,保证每条说说一个独立相册)
             this.galleryGroup = "says-" + (memo.uid || i);
             const content = marked.parse(memo.content);
-            // 把内容里的图片抽出来,移到文字下方按宫格排列(微博样式)
-            // 图片 HTML 由本类渲染器生成,结构固定,按锚点整段抽取
-            const gallery = [];
-            const contentHtml = content
-                .replace(/<a href="[^"]*" data-fancybox="[^"]*"[^>]*><img[^>]*\/><\/a>/g, (m) => {
-                    gallery.push(m);
-                    return '';
-                })
-                // 清掉抽空图片后残留的空段落
-                .replace(/<p>\s*<\/p>/g, '');
-            // 宫格 HTML:单图放大显示,多图一行 3 个 100 见方
-            const galleryHtml = gallery.length
-                ? `<div class="says-gallery${gallery.length === 1 ? ' single' : ''}">${gallery.join('')}</div>`
+            // 图片宫格直接由附件列表生成(memos 模式),不再从内容中提取图片;
+            // 旧帖正文里已内嵌的图片(地址出现在正文中)不重复进宫格,仍走正文内联渲染
+            const group = this.galleryGroup;
+            const galleryAtts = (memo.attachments || []).filter(function (att) {
+                return att && att.url && String(memo.content || '').indexOf(att.url) === -1;
+            });
+            const galleryHtml = galleryAtts.length
+                ? `<div class="says-gallery${galleryAtts.length === 1 ? ' single' : ''}">${galleryAtts.map(att => `<a href="${att.url}" data-fancybox="${group}" data-caption=""><img class="thumb" src="${att.thumb || att.url}" alt=""/></a>`).join('')}</div>`
                 : '';
             const from = memo.from || "";
             const position = memo.position || "";
             const timestamp = this.formatTime(memo.updated_at);
             html += `<div class="says-card">
-                <div class="says-content">${contentHtml}</div>${galleryHtml}
+                <div class="says-content">${content}</div>${galleryHtml}
                 <div class="says-footer">
                     <div class="meta datatime" data-value="${memo.updated_at}">${timestamp}</div>
             `;
             // 来源 / 位置,空值不渲染
-            if (from) html += `<div class="meta from">---来自「${from}」</div>`;
-            if (position) html += `<div class="meta position">📍 ${position}</div>`;
+            if (from) html += `<div class="meta from">「${from}」</div>`;
+            if (position) html += `<div class="meta position">${position}</div>`;
             // 继续
             html += `</div></div>`;
         }

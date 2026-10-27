@@ -22,7 +22,7 @@ require_once 'function.php';
  * 
  * @package Says
  * @author 猫东东
- * @version 2.1.1
+ * @version 2.2.0
  * @License Mulan PSL v2
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
@@ -31,14 +31,20 @@ class Plugin implements PluginInterface {
      * 激活插件方法,如果激活失败,直接抛出异常
      */
     public static function activate() {
-        // 获取所有 Memo (GET)
-        Helper::addRoute('says_list', '/memos/api/v1/memo', '\TypechoPlugin\Says\Action', 'getMemos');
+        // 获取所有 Memo (GET) / legacy 发布 (POST):同一路径按 HTTP 方法分发(Typecho 路由不区分方法)
+        Helper::addRoute('says_list', '/memos/api/v1/memo', '\TypechoPlugin\Says\Action', 'memoGateway');
+        // memos 兼容:实例信息,返回 0.21.0 让扩展按 legacy 流程对接(multipart 上传 + 单数发布携带 resourceIdList)
+        Helper::addRoute('says_profile', '/memos/api/v1/instance/profile', '\TypechoPlugin\Says\Action', 'profile');
+        // memos 兼容:legacy multipart 附件上传
+        Helper::addRoute('says_upload_blob', '/memos/api/v1/resource/blob', '\TypechoPlugin\Says\Action', 'uploadResourceBlob');
         // 用户登陆
         Helper::addRoute('says_auth', '/memos/api/v1/auth/status', '\TypechoPlugin\Says\Action', 'authStatus');
+        // memos 兼容:当前用户(扩展认证阶梯第一站,命中可省两次 404 探测)
+        Helper::addRoute('says_auth_me', '/memos/api/v1/auth/me', '\TypechoPlugin\Says\Action', 'authMe');
         // 发布说说
         Helper::addRoute('says_create', '/memos/api/v1/memos', '\TypechoPlugin\Says\Action', 'createMemo');
         // 上传附件
-        Helper::addRoute('says_upload_attachment', '/memos/api/v1/attachment', '\TypechoPlugin\Says\Action', 'uploadAttachment');
+        Helper::addRoute('says_upload_attachment', '/memos/api/v1/attachments', '\TypechoPlugin\Says\Action', 'uploadAttachment');
         // 获取所有标签
         Helper::addRoute('says_tags', '/memos/api/v1/tags', '\TypechoPlugin\Says\Action', 'getTags');
         // 后台管理相关
@@ -70,7 +76,10 @@ class Plugin implements PluginInterface {
     public static function deactivate() {
         // 移除路由
         Helper::removeRoute('says_list');
+        Helper::removeRoute('says_profile');
+        Helper::removeRoute('says_upload_blob');
         Helper::removeRoute('says_auth');
+        Helper::removeRoute('says_auth_me');
         Helper::removeRoute('says_create');
         Helper::removeRoute('says_upload_attachment');
         Helper::removeRoute('says_tags');

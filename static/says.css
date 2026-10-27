@@ -6,7 +6,12 @@
 .says-card .says-content .thumb{max-width:100%;height:auto;margin: .5rem auto;cursor: zoom-in}
 /* 图片横滑条:固定 100x100 方格一行排列,图多时横向滑动(不换行,信息流高度恒定)
    min-width:0 / max-width:100% 防止作为 flex/grid 子项时被内容撑开 */
-.says-gallery{display:flex;flex-wrap:nowrap;gap:4px;margin:.5rem 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scrollbar-width:thin;padding-bottom:4px;max-width:100%;min-width:0}
+.says-gallery{display:flex;flex-wrap:nowrap;gap:4px;margin:.5rem 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scrollbar-width:thin;scrollbar-color:#dcdcdc transparent;padding-bottom:4px;max-width:100%;min-width:0}
+/* 滚动条美化:细圆角浅灰,悬停加深(webkit 内核);Firefox 由上面的 scrollbar-color 控制 */
+.says-gallery::-webkit-scrollbar{height:6px}
+.says-gallery::-webkit-scrollbar-track{background:transparent}
+.says-gallery::-webkit-scrollbar-thumb{background:#dcdcdc;border-radius:3px}
+.says-gallery::-webkit-scrollbar-thumb:hover{background:#c0c0c0}
 .says-gallery a{width:100px;height:100px;overflow:hidden;display:block;flex:0 0 auto;padding:0.2rem;border:#ccc solid 1px;scroll-snap-align:start}
 .says-gallery img{width:100%;height:100%;object-fit:cover;margin:0;cursor:zoom-in}
 /* 单图:不进宫格,放大显示(不超过缩图 200px 的高分屏清晰范围) */

@@ -113,10 +113,25 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             }
             // 解析内容中的 #标签 并关联
             \TypechoPlugin\Says\Hashtag::relate((int)$lastInsertId, \TypechoPlugin\Says\Hashtag::extract($content));
+            // 组装 resources(附件图列表,memos 兼容客户端与后台行内缩略图使用)
+            $resources = [];
+            foreach (\TypechoPlugin\Says\Attachment::getBySay((int)$lastInsertId) as $att) {
+                $resources[] = [
+                    'id' => (int)$att['id'],
+                    'name' => 'resources/' . (int)$att['id'],
+                    'filename' => $att['name'],
+                    'type' => $att['mime'],
+                    'size' => (int)$att['size'],
+                    'url' => $att['url'],
+                    'thumb' => !empty($att['thumb']) ? $att['thumb'] : $att['url'],
+                    'externalLink' => $att['url'],
+                ];
+            }
             $response = ['status' => 1, 'message' => '发布成功', 'data' => [
                 'id' => $lastInsertId,
                 'source' => $customSource !== '' ? $customSource : getPlatform($agent),
                 'position' => $position !== '' ? $position : '',
+                'resources' => $resources,
             ]];
         } catch (\Exception $e) {
             $response = ['status' => 0, 'message' => '发布失败: ' . $e->getMessage()];
@@ -252,12 +267,27 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             // 重建标签:按最新内容重新解析关联
             \TypechoPlugin\Says\Hashtag::relate((int)$id, \TypechoPlugin\Says\Hashtag::extract($content));
             
+            // 组装 resources(编辑后附件可能增删,回传最新列表)
+            $resources = [];
+            foreach (\TypechoPlugin\Says\Attachment::getBySay((int)$id) as $att) {
+                $resources[] = [
+                    'id' => (int)$att['id'],
+                    'name' => 'resources/' . (int)$att['id'],
+                    'filename' => $att['name'],
+                    'type' => $att['mime'],
+                    'size' => (int)$att['size'],
+                    'url' => $att['url'],
+                    'thumb' => !empty($att['thumb']) ? $att['thumb'] : $att['url'],
+                    'externalLink' => $att['url'],
+                ];
+            }
             $response = ['status' => 1, 'message' => '修改成功', 'data' => [
                 'id' => $id,
                 'content' => $content,
                 'source' => $source,
                 'position' => $position,
                 'updated_at' => $updatedAt,
+                'resources' => $resources,
             ]];
         } catch (\Exception $e) {
             $response = ['status' => 0, 'message' => '修改失败: ' . $e->getMessage()];
@@ -329,6 +359,29 @@ $totalPages = ceil($total / $pageSize);
 // 获取当前页的说说列表
 $saysList = $db->fetchAll($db->select()->from('table.says')->order('created_at', Db::SORT_DESC)->page($currentPage, $pageSize));
 
+// 批量取当前页说说的附件(一次查询,行内显示缩略图,不再依赖内容中的图片语法)
+$pageAttachments = [];
+$sayIds = array_map('intval', array_column($saysList, 'id'));
+if (!empty($sayIds)) {
+    // 附件关联
+    $metas = $db->fetchAll($db->select()->from('table.says_attachment_meta')->where('say_id IN ?', $sayIds));
+    // 收集去重后的附件 id
+    $attIds = array_values(array_unique(array_map(function ($m) { return (int)$m['attachment_id']; }, $metas)));
+    // 有附件才查详情
+    if (!empty($attIds)) {
+        // 附件详情,按 id 索引
+        $attRows = [];
+        foreach ($db->fetchAll($db->select()->from('table.says_attachment')->where('id IN ?', $attIds)) as $row) {
+            $attRows[(int)$row['id']] = $row;
+        }
+        // 按 say_id 分组
+        foreach ($metas as $m) {
+            $aid = (int)$m['attachment_id'];
+            if (isset($attRows[$aid])) $pageAttachments[(int)$m['say_id']][] = $attRows[$aid];
+        }
+    }
+}
+
 // 生成分页URL
 function pageUrl($page) {
     $options = Helper::options();
@@ -358,6 +411,9 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                             <div class="says-toolbar">
                                 <button type="button" id="pick-image-btn" class="btn btn-xs" title="<?php _e('上传图片'); ?>">
                                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                </button>
+                                <button type="button" id="douban-btn" class="btn btn-xs" title="<?php _e('插入豆瓣卡片'); ?>">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>
                                 </button>
                                 <input type="file" id="image-input" accept="image/*" multiple style="display: none;" />
                             </div>
@@ -404,6 +460,9 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                 <button type="button" id="edit-pick-image-btn" class="btn btn-xs" title="<?php _e('上传图片'); ?>">
                                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                                 </button>
+                                <button type="button" id="edit-douban-btn" class="btn btn-xs" title="<?php _e('插入豆瓣卡片'); ?>">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>
+                                </button>
                             </div>
                         </div>
                         <!-- 该说说的附件(第一行) -->
@@ -448,14 +507,26 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                         <a href="javascript:;" data-id="<?php echo $say['id']; ?>" class="operate-delete"><?php _e('删除'); ?></a>
                                     </div>
                                     <div class="say-content" data-raw-content="<?php echo htmlspecialchars($say['content']); ?>"></div>
-                                    <div class="say-meta">
+                                    <?php if (!empty($pageAttachments[$say['id']])): ?>
+                                    <div class="says-unused say-list-attachments">
+                                        <?php foreach ($pageAttachments[$say['id']] as $att): ?>
+                                        <div class="says-unused-item" data-full="<?php echo htmlspecialchars($att['url']); ?>">
+                                            <span class="says-unused-name" title="点击放大"><?php echo htmlspecialchars($att['name']); ?></span>
+                                            <a href="javascript:;" class="says-unused-eye" title="预览">
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                            </a>
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php endif; ?>
+                                    <div class="say-meta" style="margin-top: 10px;border-top: 1px solid #e3e3e3;padding-top: 5px;">
                                         <span class="say-source"><?php _e('ID'); ?>: <?php echo $say['id']; ?></span>
                                         <?php $from = !empty($say['source']) ? trim($say['source']) : getPlatform($say['agent']); ?>
                                         <span class="say-source"><?php _e('来源'); ?>: <span class="source-text"><?php echo empty($from) ? '本站' : trim($from); ?></span></span>
                                         <?php if (!empty($say['position'])): ?>
                                         <span class="say-source"><?php _e('位置'); ?>: <?php echo htmlspecialchars($say['position']); ?></span>
                                         <?php endif; ?>
-                                        <span class="say-date" data-timestamp="<?php echo $say['updated_at']; ?>"></span>
+                                        <span class="say-date">时间：<?php echo date("Y-m-d H:i:s", $say['updated_at']); ?></span>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -512,6 +583,33 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 </div>
 
 <style>
+/* 分页条:横排方格样式(后台主题对自定义 pager 结构无样式,显式接管) */
+.typecho-pager ul {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.typecho-pager li {
+    list-style: none;
+}
+.typecho-pager a {
+    display: block;
+    padding: 2px 10px;
+    border: 1px solid #e3e3e3;
+    background: #fff;
+    border-radius: 2px;
+}
+.typecho-pager li.current a {
+    border-color: #467b96;
+    color: #467b96;
+    font-weight: bold;
+}
+.typecho-pager {
+    margin-top: 10px;
+}
 .typecho-list-table-row {
     position: relative;
     padding: 16px;
@@ -822,6 +920,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // 页面加载时解析所有现有内容
     parseExistingContent();
 
+    // 为服务端渲染的列表行附件条绑定放大预览
+    bindListAttachmentPreviews();
+
     // 时间生成
     function generateTime(date) {
         return date.getFullYear() + '-' + 
@@ -854,10 +955,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 添加说说到列表
-    function addSayToList(id, content, source, position) {
+    function addSayToList(id, content, source, position, resources) {
         const now = new Date();
         const formattedDate = generateTime(now);
-  
+
         const newSay = document.createElement('div');
         newSay.className = 'typecho-list-table-row';
         newSay.id = 'say-' + id;
@@ -867,16 +968,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 <a href="javascript:;" data-id="${id}" class="operate-delete">删除</a>
             </div>
             <div class="say-content" data-raw-content="${content.replace(/"/g, '&quot;')}"></div>
-            <div class="say-meta">
-                <span class="say-date" data-timestamp="${Math.floor(Date.now()/1000)}">${formattedDate}</span>
+            <div class="say-meta" style="margin-top: 10px;">
+                <span class="say-date" data-timestamp="${Math.floor(Date.now()/1000)}">发布时间：${formattedDate}</span>
                 <span class="say-source">来源: <span class="source-text">${source}</span></span>
                 ${position ? `<span class="say-source">位置: ${position}</span>` : ''}
                 <span class="say-source">说说ID: ${id}</span>
             </div>
         `;
-  
+
         // 填入原始文本(textContent 天然转义,无 XSS 风险)
         newSay.querySelector('.say-content').textContent = content;
+        // 填入附件条(图片与正文分离,由 resources 渲染,点击放大)
+        renderSayAttachments(newSay, Array.isArray(resources) ? resources : []);
 
         // 检查是否有"暂无说说"的提示，如果有则移除
         const emptyNotice = saysList.querySelector('.notice');
@@ -891,15 +994,62 @@ document.addEventListener('DOMContentLoaded', function() {
         attachOperationHandlers();
     }
 
+    // 渲染一条说说的附件条(memos 模式:图片与正文分离;窄条 chips,点击放大,无删除)
+    function renderSayAttachments(sayElement, resources) {
+        // 移除旧附件条(编辑后可能增删)
+        const oldBox = sayElement.querySelector('.say-list-attachments');
+        if (oldBox) oldBox.remove();
+        const list = Array.isArray(resources) ? resources : [];
+        // 无附件不渲染
+        if (list.length === 0) return;
+        // 构建窄条
+        const box = document.createElement('div');
+        box.className = 'says-unused say-list-attachments';
+        box.innerHTML = list.map(function (att) {
+            const full = (att.url || '').replace(/"/g, '&quot;');
+            return `
+                <div class="says-unused-item" data-full="${full}">
+                    <span class="says-unused-name" title="点击放大">${att.filename || ''}</span>
+                    <a href="javascript:;" class="says-unused-eye" title="预览">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </a>
+                </div>
+            `;
+        }).join('');
+        // 插到正文之后
+        const contentEl = sayElement.querySelector('.say-content');
+        if (contentEl) contentEl.insertAdjacentElement('afterend', box);
+        else sayElement.appendChild(box);
+        // 绑定预览
+        bindListAttachmentPreviews(box);
+    }
+
+    // 为列表中的附件条绑定放大预览(点文件名或眼睛都放大原图,幂等可重复调用)
+    function bindListAttachmentPreviews(scope) {
+        (scope || document).querySelectorAll('.say-list-attachments .says-unused-item').forEach(function (item) {
+            // 已绑定则跳过
+            if (item.hasAttribute('data-eye-bound')) return;
+            item.setAttribute('data-eye-bound', 'true');
+            // 预览原图
+            const full = item.getAttribute('data-full');
+            if (!full) return;
+            const open = function () { previewImage(full); };
+            item.querySelector('.says-unused-eye').addEventListener('click', open);
+            item.querySelector('.says-unused-name').addEventListener('click', open);
+        });
+    }
+
     // 更新说说列表项
-    function updateSayInList(id, content, updatedAt, source, position) {
+    function updateSayInList(id, content, updatedAt, source, position, resources) {
         const sayElement = document.getElementById('say-' + id);
         if (sayElement) {
             // 更新内容
             const contentElement = sayElement.querySelector('.say-content');
             contentElement.setAttribute('data-raw-content', content);
             contentElement.textContent = content;
-            
+
+            // 更新附件条(编辑后附件可能增删)
+            renderSayAttachments(sayElement, Array.isArray(resources) ? resources : []);
             // 更新时间
             const dateElement = sayElement.querySelector('.say-date');
             dateElement.setAttribute('data-timestamp', updatedAt);
@@ -936,6 +1086,28 @@ document.addEventListener('DOMContentLoaded', function() {
     // 发布/编辑使用的上传按钮和文件框
     const pickImageBtn = document.getElementById('pick-image-btn');
     const imageInput = document.getElementById('image-input');
+
+    // 豆瓣卡片模板插入:在光标处写入 [标题|评分|简介|封面图url](豆瓣页面地址)
+    // 前台 says.js 会把豆瓣链接渲染成卡片
+    function insertDoubanTemplate(textarea) {
+        if (!textarea) return;
+        const tpl = '[标题|评分|简介|封面图url](https://movie.douban.com/subject/)';
+        // 光标位置(取不到则追加到末尾)
+        const start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : textarea.value.length;
+        const end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
+        // 替换选区/插入模板
+        textarea.value = textarea.value.slice(0, start) + tpl + textarea.value.slice(end);
+        // 聚焦并把光标放到模板末尾,方便直接填写
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + tpl.length;
+    }
+    // 发布框:豆瓣按钮
+    const doubanBtn = document.getElementById('douban-btn');
+    if (doubanBtn) {
+        doubanBtn.addEventListener('click', function() {
+            insertDoubanTemplate(contentTextarea);
+        });
+    }
 
     // 从hidden输入框读出id数组
     function getHiddenIds(input) {
@@ -1008,8 +1180,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 data.data.forEach(function(att) {
                     // 暂存本次新上传的附件id,发布时一并关联
                     addHiddenId(publishIdsInput, att.id);
-                    // 插入到内容框
-                    contentTextarea.value += '![图片](' + att.url + ')\n';
+                    // 图片不再插入内容框,发布时以附件形式关联,前端由宫格渲染
                     // 渲染暂存区条目
                     appendUnusedItem(container, att.id, att.name, att.url, false);
                 });
@@ -1047,9 +1218,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </a>
         `;
-        // 绑定:点文件名插入
+        // 绑定:点文件名预览(图片不再插入内容,以附件形式发布)
         item.querySelector('.says-unused-name').addEventListener('click', function() {
-            contentTextarea.value += '![图片](' + url + ')\n';
+            previewImage(url);
         });
         // 绑定:眼睛预览
         item.querySelector('.says-unused-eye').addEventListener('click', function() {
@@ -1121,9 +1292,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // 读取数据
             const url = item.getAttribute('data-url');
             const id = parseInt(item.getAttribute('data-id'), 10);
-            // 点文件名插入
+            // 点文件名预览(图片不再插入内容,以附件形式发布)
             item.querySelector('.says-unused-name').addEventListener('click', function() {
-                contentTextarea.value += '![图片](' + url + ')\n';
+                previewImage(url);
                 // 登记到待关联列表,发布时一并提交(服务端渲染的旧暂存条目
                 // 不经过 uploadFiles,这里必须手动登记,否则发布时不会提交该id)
                 addHiddenId(publishIdsInput, id);
@@ -1209,7 +1380,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 已关联的附件从暂存区移除(避免一直挂在发布框下方)
                 clearStagedAttachments(selectedAttachmentIds);
                 // 添加到列表
-                addSayToList(data.data.id, content, data.data.source, data.data.position || '');
+                addSayToList(data.data.id, content, data.data.source, data.data.position || '', data.data.resources || []);
             } else {
                 // 失败
                 showMessage(data.message || '发布失败', 'error');
@@ -1246,9 +1417,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </a>
         `;
-        // 点文件名插入
+        // 点文件名预览(图片不再插入内容,以附件形式发布)
         item.querySelector('.says-unused-name').addEventListener('click', function() {
-            editContentTextarea.value += '![图片](' + url + ')\n';
+            previewImage(url);
         });
         // 眼睛预览
         item.querySelector('.says-unused-eye').addEventListener('click', function() {
@@ -1297,6 +1468,14 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => {
             showMessage('请求出错: ' + error.message, 'error');
+        });
+    }
+
+    // 编辑框:豆瓣按钮
+    const editDoubanBtn = document.getElementById('edit-douban-btn');
+    if (editDoubanBtn) {
+        editDoubanBtn.addEventListener('click', function() {
+            insertDoubanTemplate(editContentTextarea);
         });
     }
 
@@ -1361,8 +1540,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 data.data.forEach(function(att) {
                     // 暂存本次新上传的附件id,保存编辑时一并关联
                     addHiddenId(editIdsInput, att.id);
-                    // 插入内容框
-                    editContentTextarea.value += '![图片](' + att.url + ')\n';
+                    // 图片不再插入内容框,保存时以附件形式关联,前端由宫格渲染
                     // 渲染条目
                     appendEditAttachmentItem(container, att.id, att.name, att.url);
                 });
@@ -1519,7 +1697,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.status === 1) {
                 showMessage('修改成功', 'success');
                 // 更新列表中的项目
-                updateSayInList(sayId, content, data.data.updated_at, data.data.source, data.data.position || '');
+                updateSayInList(sayId, content, data.data.updated_at, data.data.source, data.data.position || '', data.data.resources || []);
                 // 编辑框已关联的附件:清空hidden输入框(编辑区条目随表单隐藏,下次打开重新渲染)
                 editIdsInput.value = '';
                 // 隐藏编辑表单并恢复原卡片
