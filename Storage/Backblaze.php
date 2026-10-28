@@ -20,7 +20,7 @@ use Typecho\Http\Client;
  * 公共逻辑(base64 落盘 / MIME / 尺寸 / MD5)见 Storage。
  * 缩图支持:doUpload 可接收缩图临时文件,随原图一并上传,
  * fileId/fileName 记入 remark 供删除;缩图上传失败不阻断原图。
- * 密钥来源:config.inc.php 中定义 SAYS_B2_KEY_ID / SAYS_B2_APPLICATION_KEY
+ * 密钥来源:config.inc.php 中定义 BACKBLAZE_KEY_ID / BACKBLAZE_APPLICATION_KEY
  * 需要的config字段: bucketId / bucketName / path / domain(可选)
  */
 class Backblaze extends Storage {
@@ -85,9 +85,9 @@ class Backblaze extends Storage {
      */
     public function __construct(array $config = []) {
         // 密钥从全局常量读取,不进数据库
-        $this->keyId = defined('SAYS_B2_KEY_ID') ? SAYS_B2_KEY_ID : '';
+        $this->keyId = defined('BACKBLAZE_KEY_ID') ? BACKBLAZE_KEY_ID : '';
         // 应用密钥从全局常量读取,不进数据库
-        $this->applicationKey = defined('SAYS_B2_APPLICATION_KEY') ? SAYS_B2_APPLICATION_KEY : '';
+        $this->applicationKey = defined('BACKBLAZE_APPLICATION_KEY') ? BACKBLAZE_APPLICATION_KEY : '';
         // 存储桶 ID
         $this->bucketId = $config['bucketId'] ?? '';
         // 存储桶名称
@@ -100,9 +100,9 @@ class Backblaze extends Storage {
         // 校验必需配置,缺什么列什么
         $missing = [];
         // 密钥 ID
-        if (empty($this->keyId)) $missing[] = 'SAYS_B2_KEY_ID';
+        if (empty($this->keyId)) $missing[] = 'BACKBLAZE_KEY_ID';
         // 应用密钥
-        if (empty($this->applicationKey)) $missing[] = 'SAYS_B2_APPLICATION_KEY';
+        if (empty($this->applicationKey)) $missing[] = 'BACKBLAZE_APPLICATION_KEY';
         // 存储桶 ID
         if (empty($this->bucketId)) $missing[] = 'bucketId';
         // 存储桶名称
