@@ -213,7 +213,7 @@ class Plugin implements PluginInterface {
             // 附件表:缩图地址(2.1 新增,无缩图时与 url 保持一致)
             'says_attachment' => [
                 'thumb' => 'TEXT DEFAULT NULL',
-                'douban' => 'TINYINT(1) DEFAULT 0', // 附件是否为豆瓣图片(2.2 新增)
+                'douban' => 'TINYINT(1) DEFAULT 0', // 附件是否为豆瓣图片(2.2.2 新增)
             ],
         ];
         // 逐表检查补全

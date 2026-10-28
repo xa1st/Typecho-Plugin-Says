@@ -86,7 +86,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
             $currentTime = time();
             // 获取UA
             $agent = $request->getAgent();
-            // 发布时的来源:手填值优先,留空则按UA自动识别一次并落库(/编辑同理)
+            // 发布时的来源:手填值优先,留空则按不显示
             $customSource = trim($request->get('source', ''));
             // 位置:可留空
             $position = trim($request->get('position', ''));
@@ -127,6 +127,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                     'url' => $att['url'],
                     'thumb' => !empty($att['thumb']) ? $att['thumb'] : $att['url'],
                     'externalLink' => $att['url'],
+                    'douban' => (int)!empty($att['douban']),
                 ];
             }
             $response = ['status' => 1, 'message' => '发布成功', 'data' => [
@@ -147,6 +148,8 @@ if ($request->isPost() && $request->get('ajax') == 1) {
         try {
             // 没有上传文件则返回错误
             if (!isset($_FILES['attachments'])) throw new \Exception('未收到上传文件');
+            // 是否豆瓣卡片封面(douban=1 时入库标记,前端宫格不展示)
+            $isDouban = (int)$request->get('douban', 0) === 1 ? 1 : 0;
             // 重组多文件上传为列表
             $files = [];
             // 单个文件直接包装为数组
@@ -176,14 +179,15 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                 if (!in_array($ext, getAllowedFileTypes())) continue;
                 // 目标路径(按配置的存储路径 + 重命名规则)
                 $target = generateTargetPath($file['name']);
-                // 上传并暂存(不关联,sayId=0)
+                // 上传并暂存(不关联,sayId=0),豆瓣封面带 douban 标记
                 try {
-                    $att = \TypechoPlugin\Says\Attachment::upload($file['tmp_name'], $target, false);
+                    $att = \TypechoPlugin\Says\Attachment::upload($file['tmp_name'], $target, false, $isDouban);
                     $attachments[] = [
                         'id' => (int)$att['id'],
                         'name' => $att['name'],
                         'url' => $att['url'],
                         'size' => (int)$att['size'],
+                        'douban' => (int)!empty($att['douban']),
                     ];
                 } catch (\Exception $e) {
                     // 单个附件上传失败不阻断
@@ -277,6 +281,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                     'url' => $att['url'],
                     'thumb' => !empty($att['thumb']) ? $att['thumb'] : $att['url'],
                     'externalLink' => $att['url'],
+                    'douban' => (int)!empty($att['douban']),
                 ];
             }
             $response = ['status' => 1, 'message' => '修改成功', 'data' => [
@@ -311,6 +316,7 @@ if ($request->isPost() && $request->get('ajax') == 1) {
                     'name' => $att['name'],
                     'url' => $att['url'],
                     'size' => (int)$att['size'],
+                    'douban' => (int)!empty($att['douban']),
                 ];
             }
             // 附带附件信息
@@ -416,9 +422,9 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                 <input type="file" id="image-input" accept="image/*" multiple style="display: none;" />
                             </div>
                         </div>
-                        <!-- 来源 / 位置(发布时可选,留空自动识别来源) -->
+                        <!-- 来源 / 位置(发布时可选,留空不显示来源) -->
                         <div class="says-publish-fields">
-                            <input type="text" id="publish-source" class="text-s" placeholder="<?php _e('来源(客户端),留空自动识别'); ?>" />
+                            <input type="text" id="publish-source" class="text-s" placeholder="<?php _e('来源(客户端),留空则不显示'); ?>" />
                             <input type="text" id="publish-position" class="text-s" placeholder="<?php _e('位置,可留空'); ?>" />
                         </div>
                         <div id="message-container" style="margin-top: 10px; display: none;"></div>
@@ -426,8 +432,9 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                             <div id="unused-attachments" class="says-unused">
                                 <?php if (!empty($unusedAttachments)): ?>
                                     <?php foreach ($unusedAttachments as $att): ?>
-                                        <div class="says-unused-item" data-id="<?php echo (int)$att['id']; ?>" data-url="<?php echo htmlspecialchars($att['url']); ?>" data-name="<?php echo htmlspecialchars($att['name']); ?>">
-                                            <span class="says-unused-name" title="<?php _e('点击插入到内容'); ?>"><?php echo htmlspecialchars($att['name']); ?></span>
+                                        <div class="says-unused-item" data-id="<?php echo (int)$att['id']; ?>" data-url="<?php echo htmlspecialchars($att['url']); ?>" data-name="<?php echo htmlspecialchars($att['name']); ?>" data-douban="<?php echo !empty($att['douban']) ? 1 : 0; ?>">
+                                            <?php if (!empty($att['douban'])): ?><span class="says-unused-badge">[豆]</span><?php endif; ?>
+                                            <span class="says-unused-name" title="<?php echo !empty($att['douban']) ? '点击插入豆瓣卡片' : _t('点击插入到内容'); ?>"><?php echo htmlspecialchars($att['name']); ?></span>
                                             <a href="javascript:;" class="says-unused-eye" title="<?php _e('预览'); ?>">
                                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                             </a>
@@ -471,7 +478,7 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                         <!-- 时间 / 来源 / 位置(第二行,各占1/3) -->
                         <div class="says-edit-fields">
                             <input type="text" id="edit-time" name="edit-time" class="text-s" placeholder="<?php _e('更新时间,留空则当前时间'); ?>" />
-                            <input type="text" id="edit-source" name="edit-source" class="text-s" placeholder="<?php _e('来源(客户端),留空则按UA自动识别'); ?>" />
+                            <input type="text" id="edit-source" name="edit-source" class="text-s" placeholder="<?php _e('来源(客户端),留空则不显示'); ?>" />
                             <input type="text" id="edit-position" name="edit-position" class="text-s" placeholder="<?php _e('位置,留空则清空'); ?>" />
                         </div>
                         
@@ -508,7 +515,8 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
                                     <?php if (!empty($pageAttachments[$say['id']])): ?>
                                     <div class="says-unused say-list-attachments">
                                         <?php foreach ($pageAttachments[$say['id']] as $att): ?>
-                                        <div class="says-unused-item" data-full="<?php echo htmlspecialchars($att['url']); ?>">
+                                        <div class="says-unused-item" data-full="<?php echo htmlspecialchars($att['url']); ?>" data-douban="<?php echo !empty($att['douban']) ? 1 : 0; ?>">
+                                            <?php if (!empty($att['douban'])): ?><span class="says-unused-badge">[豆]</span><?php endif; ?>
                                             <span class="says-unused-name" title="点击放大"><?php echo htmlspecialchars($att['name']); ?></span>
                                             <a href="javascript:;" class="says-unused-eye" title="预览">
                                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -632,7 +640,7 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 }
 .say-operation {
     position: absolute;
-    top: 16px;
+    bottom: 16px;
     right: 16px;
 }
 .say-operation a {
@@ -651,6 +659,8 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
 .say-meta {
     color: #999;
     font-size: 0.92857em;
+    /* 给右下角的编辑/删除留出空间,避免长 meta 压到按钮 */
+    padding-right: 100px;
 }
 .say-date, .say-source {
     margin-right: 15px;
@@ -793,6 +803,27 @@ $unusedAttachments = \TypechoPlugin\Says\Attachment::getUnused(50);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+/* 豆瓣封面标记 */
+.says-unused-badge {
+    color: #3354AA;
+    font-weight: bold;
+    flex: 0 0 auto;
+}
+/* 上传中的占位条:不可交互,虚框呼吸提示 */
+.says-unused-item--uploading {
+    pointer-events: none;
+    background: #fafafa;
+    border-style: dashed;
+}
+.says-unused-item--uploading .says-unused-name {
+    color: #999;
+    cursor: default;
+    animation: says-uploading-pulse 1.2s ease-in-out infinite;
+}
+@keyframes says-uploading-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .45; }
 }
 .says-unused-eye, .says-unused-del {
     display: inline-flex;
@@ -1006,7 +1037,8 @@ document.addEventListener('DOMContentLoaded', function() {
         box.innerHTML = list.map(function (att) {
             const full = (att.url || '').replace(/"/g, '&quot;');
             return `
-                <div class="says-unused-item" data-full="${full}">
+                <div class="says-unused-item" data-full="${full}" data-douban="${att.douban ? 1 : 0}">
+                    ${att.douban ? '<span class="says-unused-badge">[豆]</span>' : ''}
                     <span class="says-unused-name" title="点击放大">${att.filename || ''}</span>
                     <a href="javascript:;" class="says-unused-eye" title="预览">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -1086,10 +1118,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const imageInput = document.getElementById('image-input');
 
     // 豆瓣卡片模板插入:在光标处写入 [标题|评分|简介|封面图url](豆瓣页面地址)
-    // 前台 says.js 会把豆瓣链接渲染成卡片
-    function insertDoubanTemplate(textarea) {
+    // 前台 says.js 会把豆瓣链接渲染成卡片;传入 coverUrl 时用作封面地址
+    function insertDoubanTemplate(textarea, coverUrl) {
         if (!textarea) return;
-        const tpl = '[标题|评分|简介|封面图url](https://movie.douban.com/subject/)';
+        // 封面地址:用刚上传的图/附件条对应图,没有则保留占位
+        const cover = coverUrl || '封面图url';
+        const tpl = '[标题|评分|简介|' + cover + '](https://movie.douban.com/subject/)';
         // 光标位置(取不到则追加到末尾)
         const start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : textarea.value.length;
         const end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
@@ -1099,11 +1133,24 @@ document.addEventListener('DOMContentLoaded', function() {
         textarea.focus();
         textarea.selectionStart = textarea.selectionEnd = start + tpl.length;
     }
-    // 发布框:豆瓣按钮
+    // 发布框:豆瓣按钮(选择封面图上传,上传成功后插入豆瓣卡片模板)
     const doubanBtn = document.getElementById('douban-btn');
     if (doubanBtn) {
+        // 隐藏的封面文件选择框
+        const doubanInput = document.createElement('input');
+        doubanInput.type = 'file';
+        doubanInput.accept = 'image/*';
+        doubanInput.style.display = 'none';
+        document.body.appendChild(doubanInput);
+        // 点按钮打开选图
         doubanBtn.addEventListener('click', function() {
-            insertDoubanTemplate(contentTextarea);
+            doubanInput.click();
+        });
+        // 选好图就按豆瓣封面上传
+        doubanInput.addEventListener('change', function() {
+            const unusedContainer = document.getElementById('unused-attachments');
+            uploadFiles(this.files, unusedContainer, true);
+            this.value = '';
         });
     }
 
@@ -1150,18 +1197,53 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(mask);
     }
 
+    // ===== 上传中占位与发布锁 =====
+    // 在途上传计数:>0 时禁止发布/保存,避免"图还在传就提交"导致附件丢失
+    let uploadingCount = 0;
+
+    /**
+     * 往容器追加一个"上传中"占位条(不可点击/预览/删除,成功后原地替换)
+     * @param {HTMLElement} container 容器
+     * @returns {HTMLElement} 占位条元素
+     */
+    function appendUploadingPlaceholder(container) {
+        const item = document.createElement('div');
+        item.className = 'says-unused-item says-unused-item--uploading';
+        item.innerHTML = '<span class="says-unused-name">图片上传中…</span>';
+        container.appendChild(item);
+        return item;
+    }
+
+    /**
+     * 移除占位条
+     * @param {Array} list 占位条元素列表
+     */
+    function removeUploadingPlaceholders(list) {
+        (list || []).forEach(function (item) {
+            if (item && item.parentNode) item.parentNode.removeChild(item);
+        });
+    }
+
     /**
      * 通用上传函数:把选中的文件上传到暂存区
      * @param {FileList} files 文件列表
      * @param {HTMLElement} container 暂存区容器
+     * @param {boolean} doubanMode 是否豆瓣封面(入库标记 douban=1,成功后插入豆瓣卡片模板)
      */
-    function uploadFiles(files, container) {
+    function uploadFiles(files, container, doubanMode) {
         // 没有文件则返回
         if (!files || files.length === 0) return;
+        // 占位条:每张图一个"上传中"条目(上传期间不可点击/预览/删除)
+        const placeholders = [];
+        for (let i = 0; i < files.length; i++) placeholders.push(appendUploadingPlaceholder(container));
+        // 在途上传计数 +1
+        uploadingCount++;
         // 构建 FormData
         const formData = new FormData();
         formData.append('ajax', 1);
         formData.append('do', 'upload_attachment');
+        // 豆瓣封面标记
+        if (doubanMode) formData.append('douban', 1);
         // 逐文件加入
         for (let i = 0; i < files.length; i++) {
             formData.append('attachments', files[i]);
@@ -1173,14 +1255,17 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
+            // 移除占位条(成功则按返回顺序原地替换为真实条目)
+            removeUploadingPlaceholders(placeholders);
             if (data.status === 1 && data.data && data.data.length > 0) {
                 // 逐个渲染到暂存区
                 data.data.forEach(function(att) {
                     // 暂存本次新上传的附件id,发布时一并关联
                     addHiddenId(publishIdsInput, att.id);
-                    // 图片不再插入内容框,发布时以附件形式关联,前端由宫格渲染
-                    // 渲染暂存区条目
-                    appendUnusedItem(container, att.id, att.name, att.url, false);
+                    // 豆瓣封面:把卡片模板写进内容框(封面用刚上传的图)
+                    if (doubanMode) insertDoubanTemplate(contentTextarea, att.url);
+                    // 渲染暂存区条目(豆瓣封面带 [豆] 标记)
+                    appendUnusedItem(container, att.id, att.name, att.url, false, att.douban ? 1 : 0);
                 });
                 showMessage('上传成功', 'success');
             } else {
@@ -1188,7 +1273,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
         .catch(error => {
+            // 失败:移除占位条并提示
+            removeUploadingPlaceholders(placeholders);
             showMessage('请求出错: ' + error.message, 'error');
+        })
+        .finally(function () {
+            // 在途计数 -1
+            uploadingCount--;
         });
     }
 
@@ -1199,16 +1290,19 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {string} name 文件名
      * @param {string} url 访问地址
      * @param {boolean} fromServer 是否来自服务端数据(来自服务端即已属暂存区,不需加入 selected)
+     * @param {number} douban 是否豆瓣封面图(带 [豆] 标记,点击插入豆瓣卡片模板)
      */
-    function appendUnusedItem(container, id, name, url, fromServer) {
+    function appendUnusedItem(container, id, name, url, fromServer, douban) {
         // 构建条目
         const item = document.createElement('div');
         item.className = 'says-unused-item';
         item.setAttribute('data-id', id);
         item.setAttribute('data-url', url);
         item.setAttribute('data-name', name);
+        item.setAttribute('data-douban', douban ? '1' : '0');
         item.innerHTML = `
-            <span class="says-unused-name" title="点击插入到内容">${name}</span>
+            ${douban ? '<span class="says-unused-badge">[豆]</span>' : ''}
+            <span class="says-unused-name" title="${douban ? '点击插入豆瓣卡片' : '点击预览'}">${name}</span>
             <a href="javascript:;" class="says-unused-eye" title="预览">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </a>
@@ -1216,9 +1310,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </a>
         `;
-        // 绑定:点文件名预览(图片不再插入内容,以附件形式发布)
+        // 绑定:点名(豆瓣封面插入卡片模板,普通图预览)
         item.querySelector('.says-unused-name').addEventListener('click', function() {
-            previewImage(url);
+            if (douban) insertDoubanTemplate(contentTextarea, url);
+            else previewImage(url);
         });
         // 绑定:眼睛预览
         item.querySelector('.says-unused-eye').addEventListener('click', function() {
@@ -1290,9 +1385,12 @@ document.addEventListener('DOMContentLoaded', function() {
             // 读取数据
             const url = item.getAttribute('data-url');
             const id = parseInt(item.getAttribute('data-id'), 10);
-            // 点文件名预览(图片不再插入内容,以附件形式发布)
+            // 是否豆瓣封面(点击插入卡片模板而非预览)
+            const isDouban = item.getAttribute('data-douban') === '1';
+            // 点文件名:豆瓣封面插入卡片模板,普通图预览
             item.querySelector('.says-unused-name').addEventListener('click', function() {
-                previewImage(url);
+                if (isDouban) insertDoubanTemplate(contentTextarea, url);
+                else previewImage(url);
                 // 登记到待关联列表,发布时一并提交(服务端渲染的旧暂存条目
                 // 不经过 uploadFiles,这里必须手动登记,否则发布时不会提交该id)
                 addHiddenId(publishIdsInput, id);
@@ -1329,6 +1427,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 发布说说
     publishBtn.addEventListener('click', function() {
+        // 图片还在上传:禁止发布,避免附件丢失
+        if (uploadingCount > 0) {
+            showMessage('图片上传中,请稍候', 'error');
+            return;
+        }
         const content = contentTextarea.value.trim();
   
         if (!content) {
@@ -1346,7 +1449,7 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('do', 'publish');
         formData.append('content', content);
         formData.append('userId', '<?php echo $userId; ?>');
-        // 发布时的来源/位置(可留空,服务端留空时自动识别来源)
+        // 发布时的来源/位置(可选)
         const publishSourceInput = document.getElementById('publish-source');
         const publishPositionInput = document.getElementById('publish-position');
         const publishSource = publishSourceInput ? publishSourceInput.value.trim() : '';
@@ -1399,15 +1502,17 @@ document.addEventListener('DOMContentLoaded', function() {
      * @param {string} name 文件名
      * @param {string} url 访问地址
      */
-    function appendEditAttachmentItem(container, id, name, url) {
+    function appendEditAttachmentItem(container, id, name, url, douban) {
         // 构建条目
         const item = document.createElement('div');
         item.className = 'says-unused-item';
         item.setAttribute('data-id', id);
         item.setAttribute('data-url', url);
         item.setAttribute('data-name', name);
+        item.setAttribute('data-douban', douban ? '1' : '0');
         item.innerHTML = `
-            <span class="says-unused-name" title="点击插入到内容">${name}</span>
+            ${douban ? '<span class="says-unused-badge">[豆]</span>' : ''}
+            <span class="says-unused-name" title="${douban ? '点击插入豆瓣卡片' : '点击预览'}">${name}</span>
             <a href="javascript:;" class="says-unused-eye" title="预览">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </a>
@@ -1415,9 +1520,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </a>
         `;
-        // 点文件名预览(图片不再插入内容,以附件形式发布)
+        // 点文件名:豆瓣封面往编辑框插入卡片模板,普通图预览
         item.querySelector('.says-unused-name').addEventListener('click', function() {
-            previewImage(url);
+            if (douban) insertDoubanTemplate(editContentTextarea, url);
+            else previewImage(url);
         });
         // 眼睛预览
         item.querySelector('.says-unused-eye').addEventListener('click', function() {
@@ -1472,8 +1578,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // 编辑框:豆瓣按钮
     const editDoubanBtn = document.getElementById('edit-douban-btn');
     if (editDoubanBtn) {
+        // 隐藏的封面文件选择框
+        const editDoubanInput = document.createElement('input');
+        editDoubanInput.type = 'file';
+        editDoubanInput.accept = 'image/*';
+        editDoubanInput.style.display = 'none';
+        document.body.appendChild(editDoubanInput);
+        // 点按钮打开选图
         editDoubanBtn.addEventListener('click', function() {
-            insertDoubanTemplate(editContentTextarea);
+            editDoubanInput.click();
+        });
+        // 选好图就按豆瓣封面上传
+        editDoubanInput.addEventListener('change', function() {
+            const editAttContainer = document.getElementById('edit-attachments');
+            uploadFilesEdit(this.files, editAttContainer, true);
+            this.value = '';
         });
     }
 
@@ -1513,17 +1632,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /**
-     * 编辑时上传文件:上传到暂存区 + 插入内容 + 渲染条目
+     * 编辑时上传文件:上传到暂存区 + 渲染条目(豆瓣封面追加卡片模板)
      * @param {FileList} files 文件列表
      * @param {HTMLElement} container 附件区容器
+     * @param {boolean} doubanMode 是否豆瓣封面(入库标记 douban=1,成功后插入豆瓣卡片模板)
      */
-    function uploadFilesEdit(files, container) {
+    function uploadFilesEdit(files, container, doubanMode) {
         // 没有文件则返回
         if (!files || files.length === 0) return;
+        // 占位条:每张图一个"上传中"条目(上传期间不可点击/预览/删除)
+        const placeholders = [];
+        for (let i = 0; i < files.length; i++) placeholders.push(appendUploadingPlaceholder(container));
+        // 在途上传计数 +1
+        uploadingCount++;
         // FormData
         const formData = new FormData();
         formData.append('ajax', 1);
         formData.append('do', 'upload_attachment');
+        // 豆瓣封面标记
+        if (doubanMode) formData.append('douban', 1);
         for (let i = 0; i < files.length; i++) {
             formData.append('attachments', files[i]);
         }
@@ -1534,13 +1661,16 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
+            // 移除占位条(成功则按返回顺序原地替换为真实条目)
+            removeUploadingPlaceholders(placeholders);
             if (data.status === 1 && data.data && data.data.length > 0) {
                 data.data.forEach(function(att) {
                     // 暂存本次新上传的附件id,保存编辑时一并关联
                     addHiddenId(editIdsInput, att.id);
-                    // 图片不再插入内容框,保存时以附件形式关联,前端由宫格渲染
-                    // 渲染条目
-                    appendEditAttachmentItem(container, att.id, att.name, att.url);
+                    // 豆瓣封面:把卡片模板写进编辑框(封面用刚上传的图)
+                    if (doubanMode) insertDoubanTemplate(editContentTextarea, att.url);
+                    // 渲染条目(豆瓣封面带 [豆] 标记)
+                    appendEditAttachmentItem(container, att.id, att.name, att.url, att.douban ? 1 : 0);
                 });
                 showMessage('上传成功', 'success');
             } else {
@@ -1548,7 +1678,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
         .catch(error => {
+            // 失败:移除占位条并提示
+            removeUploadingPlaceholders(placeholders);
             showMessage('请求出错: ' + error.message, 'error');
+        })
+        .finally(function () {
+            // 在途计数 -1
+            uploadingCount--;
         });
     }
 
@@ -1607,7 +1743,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const atts = data.attachments || [];
                 // 逐个渲染
                 atts.forEach(function(att) {
-                    appendEditAttachmentItem(editAttContainer, att.id, att.name, att.url);
+                    // 回填时带上 douban 标记,豆瓣封面继续显示 [豆]
+                    appendEditAttachmentItem(editAttContainer, att.id, att.name, att.url, att.douban ? 1 : 0);
                 });
                 
                 // 就地覆盖:隐藏目标卡片,把编辑表单移到它后面原位展开
@@ -1640,6 +1777,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 保存编辑
     saveEditBtn.addEventListener('click', function() {
+        // 图片还在上传:禁止保存,避免附件丢失
+        if (uploadingCount > 0) {
+            showMessage('图片上传中,请稍候', 'error');
+            return;
+        }
         const content = editContentTextarea.value.trim();
         const customTime = editTimeInput.value.trim();
         const customSource = editSourceInput.value.trim();

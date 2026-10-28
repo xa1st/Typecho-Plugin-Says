@@ -53,10 +53,11 @@ class Attachment
      * @param string $source 本地文件路径,或 base64 数据($isbase64 为 true 时)
      * @param string $target 目标路径/文件名
      * @param bool $isbase64 是否为 base64 编码的数据
-     * @return array 附件行数据(含 id/thumb/large)
+     * @param int $douban 是否豆瓣卡片封面图(1=是,0=否),豆瓣封面在宫格中不展示
+     * @return array 附件行数据(含 id/thumb/douban)
      * @throws \Exception 上传或入库失败时抛出异常
      */
-    public static function upload(string $source, string $target, $isbase64 = false): array {
+    public static function upload(string $source, string $target, $isbase64 = false, int $douban = 0): array {
         // 数据库实例
         $db = Db::get();
         // 计算源内容 md5(base64 先解码;文件路径直接流式计算)
@@ -82,7 +83,14 @@ class Attachment
                 ->where('storage = ? AND md5 = ?', $storageType, $md5)
                 ->limit(1));
             // 已存在:直接复用(不重复上传,不增加计数)
-            if ($exists) return $exists;
+            // 豆瓣封面上传命中已有附件时,补标 douban(同一物理文件,标记共享)
+            if ($exists) {
+                if ($douban && empty($exists['douban'])) {
+                    $db->query($db->update('table.says_attachment')->rows(['douban' => 1])->where('id = ?', (int)$exists['id']));
+                    $exists['douban'] = 1;
+                }
+                return $exists;
+            }
         }
         // 未命中:执行上传(内部含缩图生成,基类已保证 thumb/large 永远有值)
         $uploaded = getStorage()->upload($source, $target, $isbase64);
@@ -96,6 +104,7 @@ class Attachment
             'size'       => $uploaded['size'],
             'mime'       => $uploaded['mime'],
             'md5'        => $uploaded['md5'],
+            'douban'     => $douban ? 1 : 0,
             'remark'     => $uploaded['remark'],
             'created_at' => time(),
         ]));

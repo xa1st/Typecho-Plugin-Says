@@ -182,6 +182,7 @@ class Action extends Widget {
                         'name' => $att['name'],
                         'size' => (int)$att['size'],
                         'mime' => $att['mime'],
+                        'douban' => (int)!empty($att['douban']),
                     ];
                 }
                 // 组装数据

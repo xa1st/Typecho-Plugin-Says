@@ -272,10 +272,11 @@ class MemoLoader {
             this.galleryGroup = "says-" + (memo.uid || i);
             const content = marked.parse(memo.content);
             // 图片宫格直接由附件列表生成(memos 模式),不再从内容中提取图片;
+            // 豆瓣封面(douban=1)不进宫格(已通过豆瓣卡片展示),
             // 旧帖正文里已内嵌的图片(地址出现在正文中)不重复进宫格,仍走正文内联渲染
             const group = this.galleryGroup;
             const galleryAtts = (memo.attachments || []).filter(function (att) {
-                return att && att.url && String(memo.content || '').indexOf(att.url) === -1;
+                return att && att.url && !att.douban && String(memo.content || '').indexOf(att.url) === -1;
             });
             const galleryHtml = galleryAtts.length
                 ? `<div class="says-gallery${galleryAtts.length === 1 ? ' single' : ''}">${galleryAtts.map(att => `<a href="${att.url}" data-fancybox="${group}" data-caption=""><img class="thumb" src="${att.thumb || att.url}" alt=""/></a>`).join('')}</div>`
