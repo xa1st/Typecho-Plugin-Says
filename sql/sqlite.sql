@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS {{prefix}}says (
     uuid VARCHAR(36) NOT NULL,
     ip VARCHAR(50) DEFAULT NULL,
     source VARCHAR(255) DEFAULT NULL,
-    position VARCHAR(255) DEFAULT NULL,
+    position VARCHAR(255) DEFAULT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS {{prefix}}says_uuid ON {{prefix}}says (uuid);
 CREATE INDEX IF NOT EXISTS {{prefix}}says_status ON {{prefix}}says (status);
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS {{prefix}}says_attachment (
     storage varchar(32) NOT NULL,
     num INTEGER DEFAULT NULL,
     url text NOT NULL,
+    thumb text DEFAULT NULL,
     size INTEGER DEFAULT NULL,
     mime varchar(128) DEFAULT NULL,
     md5 varchar(32) DEFAULT NULL,

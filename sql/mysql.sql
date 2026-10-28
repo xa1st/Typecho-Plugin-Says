@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}says_attachment` (
     `name` varchar(255) NOT NULL COMMENT '文件名称',
     `num` int(11) DEFAULT NULL COMMENT '使用次数',
     `url` text NOT NULL COMMENT '附件访问地址',
+    `thumb` text DEFAULT NULL COMMENT '缩略图地址(无缩图时与url一致)',
     `size` int(11) DEFAULT NULL COMMENT '文件大小(字节)',
     `mime` varchar(128) DEFAULT NULL COMMENT 'MIME类型',
     `md5` varchar(32) DEFAULT NULL COMMENT '文件 MD5',

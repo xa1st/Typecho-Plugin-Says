@@ -8,6 +8,7 @@ namespace TypechoPlugin\Says\Storage;
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
 use Typecho\Common;
+use TypechoPlugin\Says\Thumbnail\Thumbnail;
 
 /**
  * 存储抽象基类(模板方法)
@@ -17,13 +18,17 @@ use Typecho\Common;
  *   - base64 数据统一落盘为临时文件(与普通文件路径统一,后续全走文件路径)
  *   - MIME 检测(Typecho 原生 finfo,不做扩展名猜谜)
  *   - 文件大小 / MD5 统计(供附件表 md5 去重 / num 引用计数)
+ *   - 缩图生成:物理模式存储(默认)上传前调用 Thumbnail 生成小图,随原图一并上传;
+ *     参数模式存储(覆写 thumbMode() 返回 'param',如又拍云)跳过生成,由存储自行拼处理参数 URL
  *   - 临时文件清理(try/finally,异常也不残留)
  *
  * 子类只需实现:
- *   - doUpload():真正执行上传,返回存储特有字段(storage/url/remark)
+ *   - doUpload():真正执行上传,返回存储特有字段(storage/url/remark/thumb)
  *   - delete():删除存储中的文件
+ *   - 参数模式存储额外覆写 thumbMode() 返回 'param'
  *
  * 附件表公共字段(name/size/mime/md5)由基类自动填充,
+ * thumb 为空时基类自动回退原图 url,保证字段永远有值,
  * 各存储特有字段(如 B2 的 fileId)由子类放进 remark。
  */
 abstract class Storage {
@@ -65,35 +70,76 @@ abstract class Storage {
             throw new \Exception('文件不存在或不可读: ' . $source);
         }
 
+        // 缩图临时文件路径(finally 统一清理)
+        $thumbTempFile = '';
         try {
+            // 生成缩图(仅物理模式;参数模式如又拍云不生成本地文件,由存储自行拼处理参数 URL)
+            $thumb = null;
+            if ($this->thumbMode() === 'physical') {
+                try {
+                    // 生成缩图(不适合缩或生成失败时为 null,回退原图)
+                    $generated = Thumbnail::create($filePath);
+                    if (!empty($generated)) {
+                        // 组装缩图任务:临时文件路径 + 目标路径(扩展名前插 .thumb)
+                        $thumb = ['path' => $generated['path'], 'target' => Thumbnail::deriveTarget($target)];
+                        // 登记临时文件,供 finally 清理
+                        $thumbTempFile = $generated['path'];
+                    }
+                } catch (\Throwable $e) {
+                    // 缩图生成异常不阻断上传,直接回退原图
+                    $thumb = null;
+                    $thumbTempFile = '';
+                }
+            }
             // 子类执行真正的上传,返回存储特有字段
-            $result = $this->doUpload($filePath, $target);
+            $result = $this->doUpload($filePath, $target, $thumb);
             // 组装附件表公共字段 + 子类特有字段
-            return array_merge([
+            $row = array_merge([
                 'name' => basename($target),
                 'size' => $this->detectSize($filePath),
                 'mime' => $this->detectMime($filePath),
                 'md5'  => $this->detectMd5($filePath),
             ], $result);
+            // 缩图字段兜底:没有生成/上传成功的直接用原图地址,保证字段永远有值
+            $row['thumb'] = !empty($row['thumb']) ? $row['thumb'] : $row['url'];
+            // 返回
+            return $row;
         } finally {
             // 清理临时文件,异常也不残留
             if ($isTmp && is_file($filePath))  @unlink($filePath);
+            // 清理缩图临时文件(上传已在 doUpload 内完成,临时文件不再需要)
+            if ($thumbTempFile !== '' && is_file($thumbTempFile)) @unlink($thumbTempFile);
         }
+    }
+
+    /**
+     * 缩图模式:物理模式(基类生成缩图文件并随原图一并上传)
+     *
+     * 参数模式的存储(如又拍云)覆写本方法返回 'param',基类将跳过本地缩图生成。
+     *
+     * @return string 'physical' 或 'param'
+     */
+    public function thumbMode(): string {
+        // 物理模式
+        return 'physical';
     }
 
     /**
      * 真正执行上传(子类实现)
      *
      * 返回附件表行数据中属于各存储的字段,例如:
-     *   ['storage' => 'backblaze', 'url' => '...', 'remark' => '{...}']
-     * 公共字段(name/size/mime/md5)由基类自动填充,无需返回。
+     *   ['storage' => 'backblaze', 'url' => '...', 'thumb' => '...', 'remark' => '{...}']
+     * 公共字段(name/size/mime/md5)由基类自动填充,无需返回;
+     * thumb 为 null 时基类自动回退原图 url。
      *
      * @param string $filePath 已就绪的本地文件路径(可能是 base64 落盘的临时文件)
      * @param string $target 目标路径/文件名(已规范化)
+     * @param array|null $thumb 缩图任务(仅物理模式传入,参数模式为 null):
+     *   ['path' => 缩图临时文件, 'target' => 相对目标路径]
      * @return array 存储特有字段
      * @throws \Exception 上传失败抛出异常
      */
-    abstract protected function doUpload(string $filePath, string $target): array;
+    abstract protected function doUpload(string $filePath, string $target, ?array $thumb = null): array;
 
     /**
      * 删除存储中的文件(子类实现)

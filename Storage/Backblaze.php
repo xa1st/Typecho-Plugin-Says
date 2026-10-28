@@ -14,10 +14,12 @@ use Typecho\Http\Client;
  *
  * 使用 B2 API v2:
  *   1. b2_authorize_account    认证,获取 apiUrl / downloadUrl / authorizationToken
- *   2. b2_get_upload_url       获取上传地址(上传前获取)
+ *   2. b2_get_upload_url       获取上传地址(为稳妥起见,每个文件上传前单独获取)
  *   3. b2_delete_file_version  删除文件(需 fileName + fileId)
  *
  * 公共逻辑(base64 落盘 / MIME / 尺寸 / MD5)见 Storage。
+ * 缩图支持:doUpload 可接收缩图临时文件,随原图一并上传,
+ * fileId/fileName 记入 remark 供删除;缩图上传失败不阻断原图。
  * 密钥来源:config.inc.php 中定义 SAYS_B2_KEY_ID / SAYS_B2_APPLICATION_KEY
  * 需要的config字段: bucketId / bucketName / path / domain(可选)
  */
@@ -114,19 +116,106 @@ class Backblaze extends Storage {
      *
      * @param string $filePath 本地文件路径(基类已就绪)
      * @param string $target 目标路径/文件名
-     * @return array 附件表特有字段(storage/url/remark)
+     * @param array|null $thumb 缩图任务(物理存储模式由基类传入,无缩图为 null):
+     *   ['path' => 缩图临时文件, 'target' => 相对目标路径]
+     * @return array 附件表特有字段(storage/url/remark/thumb,thumb 为 null 时由基类回退原图)
      * @throws \Exception
      */
-    protected function doUpload(string $filePath, string $target): array {
-        // 完整存储路径(带前缀)
+    protected function doUpload(string $filePath, string $target, ?array $thumb = null): array {
+        // 原图桶内完整路径(带前缀)
         $remotePath = $this->path . $target;
+        // 上传原图(失败直接抛出异常,整体上传失败)
+        $result = $this->uploadOne($filePath, $remotePath);
+        // remark:删除时需要的信息,原图的 fileId/fileName 必须记录
+        $remark = [
+            'fileId'          => $result['fileId'],
+            'fileName'        => $remotePath,
+            'bucketId'        => $this->bucketId,
+            'bucket'          => $this->bucketName,
+            'uploadTimestamp' => $result['uploadTimestamp'] ?? null,
+            'contentSha1'     => $result['contentSha1'] ?? null,
+        ];
+        // 缩图 URL(未上传或上传失败时为 null,由基类回退原图)
+        $thumbUrl = null;
+        // 上传缩图
+        if (!empty($thumb['path'])) {
+            try {
+                // 缩图桶内完整路径
+                $thumbRemote = $this->path . $thumb['target'];
+                // 上传
+                $thumbResult = $this->uploadOne($thumb['path'], $thumbRemote);
+                // 记录删除所需信息
+                $remark['thumbFileId'] = $thumbResult['fileId'];
+                $remark['thumbFileName'] = $thumbRemote;
+                // 生成访问地址
+                $thumbUrl = $this->getUrl($thumb['target']);
+            } catch (\Throwable $e) {
+                // 缩图上传失败不阻断主流程,前端回退原图
+            }
+        }
+        // 返回存储特有字段(公共字段 name/size/mime/md5 由基类填充)
+        return [
+            // 存储类型
+            'storage' => 'backblaze',
+            // 文件 URL
+            'url'     => $this->getUrl($target),
+            // 缩图 URL
+            'thumb'   => $thumbUrl,
+            // B2 各文件的 fileId/fileName 全放 remark,删除时使用
+            'remark'  => json_encode($remark, JSON_UNESCAPED_UNICODE),
+        ];
+    }
+
+    /**
+     * 删除 B2 中的文件
+     *
+     * 从附件行的 remark 中取 fileId + fileName 删除原图(必须成功),
+     * 缩图尽力而为,失败不阻断;老数据没有缩图记录时自动跳过。
+     *
+     * @param array $attachment 附件表完整行(remark 中包含各文件的 fileId/fileName)
+     * @return bool 是否删除成功
+     */
+    public function delete(array $attachment): bool {
+        try {
+            // 从 remark 中提取 B2 保存的信息
+            $remark = isset($attachment['remark']) ? json_decode($attachment['remark'], true) : [];
+            // 缺少必要信息则失败
+            if (!is_array($remark)) $remark = [];
+            // 提取原图的 fileId 和 fileName
+            $fileId = $remark['fileId'] ?? '';
+            // 文件名
+            $fileName = $remark['fileName'] ?? '';
+            // 缺少必要信息则失败
+            if ($fileId === '' || $fileName === '') return false;
+            // 删除原图(必须成功)
+            if (!$this->deleteFile($fileId, $fileName)) return false;
+            // 缩图尽力删除,失败不阻断(老数据没有缩图记录则跳过)
+            if (!empty($remark['thumbFileId'])) {
+                $this->deleteFile((string)$remark['thumbFileId'], (string)$remark['thumbFileName']);
+            }
+            // 成功
+            return true;
+        } catch (\Exception $e) {
+            // 删除失败,返回 false 不抛异常
+            return false;
+        }
+    }
+
+    /**
+     * 上传单个文件到 B2
+     *
+     * @param string $filePath 本地文件路径
+     * @param string $remotePath 桶内完整路径(带前缀)
+     * @return array B2 响应(含 fileId/fileName/uploadTimestamp 等)
+     * @throws \Exception
+     */
+    private function uploadOne(string $filePath, string $remotePath): array {
         // 读取文件内容
         $data = file_get_contents($filePath);
         // 读取失败
         if ($data === false) throw new \Exception('无法读取文件内容: ' . $filePath);
-        // 认证 + 获取上传地址
+        // 认证 + 获取上传地址(为稳妥起见,每个文件单独获取上传地址)
         $auth = $this->authorize();
-        // 获取上传地址
         $uploadUrl = $this->getUploadUrl($auth);
         // 开始上传文件
         try {
@@ -152,44 +241,19 @@ class Backblaze extends Storage {
         }
         // 上传失败
         if (empty($result['fileId'])) throw new \Exception('B2 上传失败: 未获取到 fileId');
-        // 返回存储特有字段(公共字段 name/size/mime/md5 由基类填充)
-        return [
-            // 存储类型
-            'storage' => 'backblaze',
-            // 文件 URL
-            'url'     => $this->getUrl($target),
-            // B2 删除需要 fileId + fileName,全放 remark
-            'remark'  => json_encode([
-                'fileId'          => $result['fileId'],
-                'fileName'        => $remotePath,
-                'bucketId'        => $this->bucketId,
-                'bucket'          => $this->bucketName,
-                'uploadTimestamp' => $result['uploadTimestamp'] ?? null,
-                'contentSha1'     => $result['contentSha1'] ?? null,
-            ], JSON_UNESCAPED_UNICODE),
-        ];
+        // 返回 B2 响应
+        return $result;
     }
 
     /**
-     * 删除 B2 中的文件
+     * 删除 B2 中的单个文件版本
      *
-     * 从附件行的 remark 中取 fileId + fileName 直接删除,不再按文件名搜索
-     *
-     * @param array $attachment 附件表完整行(remark 中包含 fileId/fileName)
+     * @param string $fileId 文件版本 id
+     * @param string $fileName 文件名
      * @return bool 是否删除成功
      */
-    public function delete(array $attachment): bool {
+    private function deleteFile(string $fileId, string $fileName): bool {
         try {
-            // 从 remark 中提取 B2 保存的信息
-            $remark = isset($attachment['remark']) ? json_decode($attachment['remark'], true) : [];
-            // 缺少必要信息则失败
-            if (!is_array($remark)) $remark = [];
-            // 提取 fileId 和 fileName
-            $fileId = $remark['fileId'] ?? '';
-            // 文件名
-            $fileName = $remark['fileName'] ?? '';
-            // 缺少必要信息则失败
-            if ($fileId === '' || $fileName === '') return false;
             // 认证
             $auth = $this->authorize();
             // 使用Typecho HTTP 客户端

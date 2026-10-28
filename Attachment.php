@@ -14,8 +14,9 @@ use Typecho\Db;
  *
  * 负责附件表(says_attachment)和说说-附件关联表(says_attachment_meta)的读写。
  * 核心逻辑:
- *   - 上传附件:调存储上传,按 (storage, md5) 去重,已存在则 num+1 复用
- *   - 删除附件:删关联记录,num-1,归零才真正删存储中的文件
+ *   - 上传附件:先按 (storage, md5) 预查重,命中直接复用;未命中才调存储上传
+ *     (含缩图生成,thumb 一并入库)
+ *   - 删除附件:删关联记录,num-1,归零才真正删存储中的文件(含缩图)
  *   - 获取附件:二次查询(meta → attachment),避免 join 字段冲突
  *
  * 真正上传/删除文件的行为委托给 getStorage() 返回的存储实例,本类只负责数据库层。
@@ -46,35 +47,52 @@ class Attachment
      *
      * 上传的附件先放在暂存区(num=0,未关联任何说说),
      * 发表/编辑时再通过 relate() 关联到说说。
-     * 按 (storage, md5) 去重,已存在则直接复用,不重复上传。
+     * 先按 (storage, md5) 预查重再上传:命中直接复用现有记录,连物理文件都不用传
+     * (一次上传包含原图+缩图+大图,重复上传的浪费会成倍放大)。
      *
      * @param string $source 本地文件路径,或 base64 数据($isbase64 为 true 时)
      * @param string $target 目标路径/文件名
      * @param bool $isbase64 是否为 base64 编码的数据
-     * @return array 附件行数据(含 id)
+     * @return array 附件行数据(含 id/thumb/large)
      * @throws \Exception 上传或入库失败时抛出异常
      */
     public static function upload(string $source, string $target, $isbase64 = false): array {
         // 数据库实例
         $db = Db::get();
-        // 调用存储上传,返回附件行数据
-        $uploaded = getStorage()->upload($source, $target, $isbase64);
-        // 按 (storage + md5) 查重,已存在则复用
-        $exists = $db->fetchRow($db->select()
-            ->from('table.says_attachment')
-            ->where('storage = ? AND md5 = ?', $uploaded['storage'], $uploaded['md5'])
-            ->limit(1));
-        // 查重
-        if ($exists) {
-            // 已存在:直接复用(不重复上传,不增加计数)
-            return $exists;
+        // 计算源内容 md5(base64 先解码;文件路径直接流式计算)
+        if ($isbase64) {
+            // 解码(解码失败时置空,跳过预查重走正常上传)
+            $data = base64_decode($source, true);
+            // 计算内容 md5
+            $md5 = $data === false ? '' : md5($data);
+        } else {
+            // 流式计算文件 md5
+            $fileMd5 = @md5_file($source);
+            // 计算失败置空
+            $md5 = $fileMd5 === false ? '' : $fileMd5;
         }
-        // 不存在:插入新附件行,num=0 表示未关联
+        // md5 有效才预查重
+        if ($md5 !== '') {
+            // 当前配置的存储类型(与 getStorage() 读取同一配置,组成查重键)
+            $options = \Utils\Helper::options()->plugin('Says');
+            $storageType = isset($options->storage) && !empty($options->storage) ? $options->storage : 'local';
+            // 按 (storage + md5) 查重
+            $exists = $db->fetchRow($db->select()
+                ->from('table.says_attachment')
+                ->where('storage = ? AND md5 = ?', $storageType, $md5)
+                ->limit(1));
+            // 已存在:直接复用(不重复上传,不增加计数)
+            if ($exists) return $exists;
+        }
+        // 未命中:执行上传(内部含缩图生成,基类已保证 thumb/large 永远有值)
+        $uploaded = getStorage()->upload($source, $target, $isbase64);
+        // 插入新附件行,num=0 表示未关联
         $uploaded['id'] = (int)$db->query($db->insert('table.says_attachment')->rows([
             'name'       => $uploaded['name'],
             'storage'    => $uploaded['storage'],
             'num'        => 0,
             'url'        => $uploaded['url'],
+            'thumb'      => $uploaded['thumb'],
             'size'       => $uploaded['size'],
             'mime'       => $uploaded['mime'],
             'md5'        => $uploaded['md5'],

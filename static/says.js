@@ -17,6 +17,8 @@ class MemoLoader {
         };
         // 状态参数
         this.state = {currentPage: 1, isLoading: false, hasMore: true };
+        // 附件映射:原图 URL → 缩图/大图(渲染当前说说前重建,供图片渲染器查询)
+        this.attMap = {};
         // DOM元素
         this.container = null;
         this.loadButton = null;
@@ -87,9 +89,12 @@ class MemoLoader {
         const renderer = new marked.Renderer();
         // 自定义图片解析
         renderer.image = (href) => {
-            // console.log(href);
-            // 渲染图片为带有特定类名和属性的div结构，以适应特定的样式和功能需求
-            return `<img class="thumb" src="${href.href}" title="${href.text}' alt='${href.text}"/>`;
+            // 查当前说说的附件映射:命中用缩图显示;未命中(外链图/旧数据)直接用原图
+            const att = this.attMap && this.attMap[href.href];
+            // 不点击时只加载小图;点击时由 Fancybox 显示原图(原图地址放锚点 href)
+            const src = att ? att.thumb : href.href;
+            // 包一层 fancybox 锚点:按当前说说分组(渲染每条说说前更新),弹窗内只在该说说的图片间切换
+            return `<a href="${href.href}" data-fancybox="${this.galleryGroup}" data-caption="${href.text}"><img class="thumb" src="${src}" title="${href.text}" alt="${href.text}"/></a>`;
         };
         // 自定义链接渲染
         renderer.link = (href) => {
@@ -258,18 +263,34 @@ class MemoLoader {
         let html = "";
         for (let i = 0; i < data.length; i++) {
             const memo = data[i];
+            // 重建当前说说的附件映射:原图 URL → 缩图(旧帖内容里内嵌的图片用它换成缩略图)
+            this.attMap = {};
+            (memo.attachments || []).forEach(att => {
+                if (att && att.url) this.attMap[att.url] = { thumb: att.thumb || att.url };
+            });
+            // 当前说说的 Fancybox 分组名(用说说 uid,保证每条说说一个独立相册)
+            this.galleryGroup = "says-" + (memo.uid || i);
             const content = marked.parse(memo.content);
+            // 图片宫格直接由附件列表生成(memos 模式),不再从内容中提取图片;
+            // 旧帖正文里已内嵌的图片(地址出现在正文中)不重复进宫格,仍走正文内联渲染
+            const group = this.galleryGroup;
+            const galleryAtts = (memo.attachments || []).filter(function (att) {
+                return att && att.url && String(memo.content || '').indexOf(att.url) === -1;
+            });
+            const galleryHtml = galleryAtts.length
+                ? `<div class="says-gallery${galleryAtts.length === 1 ? ' single' : ''}">${galleryAtts.map(att => `<a href="${att.url}" data-fancybox="${group}" data-caption=""><img class="thumb" src="${att.thumb || att.url}" alt=""/></a>`).join('')}</div>`
+                : '';
             const from = memo.from || "";
             const position = memo.position || "";
             const timestamp = this.formatTime(memo.updated_at);
             html += `<div class="says-card">
-                <div class="says-content">${content}</div>
+                <div class="says-content">${content}</div>${galleryHtml}
                 <div class="says-footer">
                     <div class="meta datatime" data-value="${memo.updated_at}">${timestamp}</div>
             `;
             // 来源 / 位置,空值不渲染
-            if (from) html += `<div class="meta from">---来自「${from}」</div>`;
-            if (position) html += `<div class="meta position">📍 ${position}</div>`;
+            if (from) html += `<div class="meta from">「${from}」</div>`;
+            if (position) html += `<div class="meta position">${position}</div>`;
             // 继续
             html += `</div></div>`;
         }
@@ -277,8 +298,8 @@ class MemoLoader {
         const loader = this.container.querySelector(".loader");
         if (loader) loader.remove();
         this.container.insertAdjacentHTML("beforeend", `<!--说说主体开始-->${html}<!--说说主体结束-->`);
-        // 使用全局懒加载管理器处理新加载的内容
-        if (window.lazyLoadManager) window.lazyLoadManager.processImages(".says-content");
+        // 使用全局懒加载管理器处理新加载的内容(图片已移到宫格区)
+        if (window.lazyLoadManager) window.lazyLoadManager.processImages(".says-content, .says-gallery");
     }
 
     /**

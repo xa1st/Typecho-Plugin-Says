@@ -1,9 +1,22 @@
-.says-card{margin: 1rem auto 2rem; border: #eee solid 1px;padding:1.5rem;border-radius: .5rem;}
-.says-card .says-content{font-size: 1rem;}
-.says-card .says-footer{display: flex;justify-content: space-between;align-items:center;border-top: #EEE solid 1px;padding: 1rem 0 0;font-size: .875rem;}
+.says-card{margin: 1rem auto 2rem; border: #eee solid 1px;padding:1rem;border-radius: .5rem;max-width:100%;min-width:0}
+.says-card .says-content{font-size: 1rem;margin-bottom: .5rem;}
+.says-card .says-footer{display: flex;justify-content: space-between;align-items:center;border-top: #EEE solid 1px;padding: 0.5rem 0 0;font-size: .875rem;}
 .says-card .says-content .tag-span{color: #3354AA}
 .says-card .says-footer .meta.position{color:#999}
-.says-card .says-content .thumb{max-width:100%;height:auto;margin: .5rem auto}
+.says-card .says-content .thumb{max-width:100%;height:auto;margin: .5rem auto;cursor: zoom-in}
+/* 图片横滑条:固定 100x100 方格一行排列,图多时横向滑动(不换行,信息流高度恒定)
+   min-width:0 / max-width:100% 防止作为 flex/grid 子项时被内容撑开 */
+.says-gallery{display:flex;flex-wrap:nowrap;gap:4px;margin-bottom:.5rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scrollbar-width:thin;scrollbar-color:#dcdcdc transparent;padding-bottom:4px;max-width:100%;min-width:0}
+/* 滚动条美化:细圆角浅灰,悬停加深(webkit 内核);Firefox 由上面的 scrollbar-color 控制 */
+.says-gallery::-webkit-scrollbar{height:6px}
+.says-gallery::-webkit-scrollbar-track{background:transparent}
+.says-gallery::-webkit-scrollbar-thumb{background:#dcdcdc;border-radius:3px}
+.says-gallery::-webkit-scrollbar-thumb:hover{background:#c0c0c0}
+.says-gallery a{width:100px;height:auto;overflow:hidden;display:block;flex:0 0 auto;padding:0.2rem;border:#ccc solid 1px;scroll-snap-align:start}
+.says-gallery img{width:100%;height:100%;object-fit:cover;margin:0;cursor:zoom-in}
+/* 单图:不进宫格,放大显示(不超过缩图 200px 的高分屏清晰范围) */
+.says-gallery.single a{width:auto;max-width:200px;aspect-ratio:auto}
+.says-gallery.single img{width:auto;height:auto;max-width:100%;max-height:400px;object-fit:contain}
 .says-card .says-content .bilivideo {position: relative; width: 100%; height: 100%;padding-bottom: 55%}
 .says-card .says-content .bilivideo iframe{position: absolute;width: 100%; height: 100%;}
 .says-card .says-content .douban-card{display: flex;align-items: center; position: relative; box-shadow: 0 0 2px 0 rgba(0, 0, 0, 0.3); padding:0.5rem; margin: 1rem auto}
@@ -14,7 +27,7 @@
 .says-card .says-content .douban-card .info .rating-text{line-height: 1rem; margin-left:.25rem}
 .says-card .says-content .douban-card .douban-card-type{position:absolute;top:0;right:0; font-size: 0.875rem; font-style:italic; background-color: #3354AA; color: #FFF;padding: 0.25rem 0.5rem;border-bottom-left-radius:0.5rem;border-top-right-radius:0.5rem}
 .says-card.bb-container {margin-block:auto;padding: 0.75rem 0}
-.says-card.bb-container .bb-load{display: block;width:100%; background: unset; line-height: 1.2rem;border:0}
+.says-card.bb-container .bb-load{display: block;width:100%; background: unset; line-height: 1.2rem;border:0;cursor: pointer}
 .rating-star{display:inline-block;width:75px;height:15px;margin-right:12px;background-repeat:no-repeat;background-position:0 center;background-image:url('data:image/png;background-repeat:no-repeat;    base64,iVBORw0KGgoAAAANSUhEUgAAAEsAAAClCAYAAAAUAAAYAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA5xJREFUeNrs3T9rFEEcxvG7qEQIglaCICKkin9AUEtBKxU7wS61VlYivgWj70TtNFj5BqzE7qxEWwsxKIoYn4UtluFmbm8nczvzm+/BjxyuDwNzu3uXD0+46f7LC5PA45Hm+WTYw1x2LRDc0jzTXB+wqMlsaLPutz8fDFjYZHYauAz3NBvt83XNnyUWNpn1nVm3OsHmsb3EomazzZnVXKMPNcc0xzUnNKc0Rzv/77fms+Z7O3vt9b1eU7bZrNN68l5zcolX4ofmsuZXTdnmMvyi2dR86Bmcac62P6vKrnVubpc0bxYE32nOab45N8YqsvPeDfcD4SOav4HjprPuu+H5BTt9LXDMfNbdLPfT678Fx6vKupt1o/O8+R3pkOaJ5/iktqx7z/qp+aq5q/nY+fczmheaK03Gs7D5rLtZdzSvA6/Ebc2u55j57HQB0TzW7AzkjiKzny6+2hlKNE8juMNcFqKBaIZndRlCNBBNgmx7ZkE0fbLtZkE0EA1EM17WuQwhGogGooFoss6296y52cNO+J6HLJoPaFdbsvA9zGerIxrPh85eWYgGooFoDiQbuAxp0UA0EVmdWbRo+ma1WbRoIBqIZtzsnHdDWjQQDUQD0WSbde5ZS2UhmtqJJtSEiVkXooFoIJre2VATJmZdiKZ2ogk1YSb8oVMvDeUPnSAaiCaPJkzMuhANRAPRQDQpsqEmTMy6EI11oolpwkA0EA1EcyDZmCYMRAPR+LMxTZjqiCamCQPRQDQQzehNGIgGooFoIJpVZ2OaMBBN7USTqgkD0UA0EE3vbKomDERTO9GkasKYJJpUTRiIBqKBaEZvwkA0EA1EA9GkyKZqwkA01olmrCYMRAPRQDR9LkO+0QmiKbAJUyTRjNWEgWggGohm9CYMRAPRQDQQzZDsWE0YiMYC0eTYhIFoIJrKiCbHJgxEY4FocmzCZEs0OTZhIBqIpjKiybEJA9FANBANROPL5tiEgWhKIJoSmzAQDURjjGhKbMJANCUQTYlNmNGIpsQmDEQD0RgjmhKbMBANRAPR1Es0JTZhIJpciMZaEwaigWgKJBprTRiIJheisdaESUo01powEA1EUyDRWGvCQDQQDURjm2isNWEgmlURzWw2q4pZIBqIJkOiCVyGJpkFolkV0ejMMvel28mIRptl7ku3IRqIpjCimfNuaJpZIBqIBqIpm2ice5Z5ZonJupvVkMRu4JW4qXnrOWY++1+AAQBw9BJSCTeN9wAAAABJRU5ErkJggg==');overflow:hidden}
 .allstar10{background-position:0 0}
 .allstar9{background-position:0 -15px}

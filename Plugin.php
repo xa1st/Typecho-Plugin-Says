@@ -22,7 +22,7 @@ require_once 'function.php';
  * 
  * @package Says
  * @author 猫东东
- * @version 2.0.0
+ * @version 2.2.1
  * @License Mulan PSL v2
  * @link https://github.com/xa1st/Typecho-Plugin-Says
  */
@@ -31,14 +31,16 @@ class Plugin implements PluginInterface {
      * 激活插件方法,如果激活失败,直接抛出异常
      */
     public static function activate() {
-        // 获取所有 Memo (GET)
-        Helper::addRoute('says_list', '/memos/api/v1/memo', '\TypechoPlugin\Says\Action', 'getMemos');
-        // 用户登陆
-        Helper::addRoute('says_auth', '/memos/api/v1/auth/status', '\TypechoPlugin\Says\Action', 'authStatus');
-        // 发布说说
-        Helper::addRoute('says_create', '/memos/api/v1/memos', '\TypechoPlugin\Says\Action', 'createMemo');
-        // 上传附件
-        Helper::addRoute('says_upload_attachment', '/memos/api/v1/attachment', '\TypechoPlugin\Says\Action', 'uploadAttachment');
+        // 获取所有 Memo (GET) / legacy 发布 (POST):同一路径按 HTTP 方法分发(Typecho 路由不区分方法)
+        Helper::addRoute('says_list', '/memos/api/v1/memo', '\TypechoPlugin\Says\Action', 'memoGateway');
+        // memos 兼容:实例信息,返回 0.21.0 让扩展按 legacy 流程对接(multipart 上传 + 单数发布携带 resourceIdList)
+        Helper::addRoute('says_profile', '/memos/api/v1/instance/profile', '\TypechoPlugin\Says\Action', 'profile');
+        // memos 兼容:legacy multipart 附件上传
+        Helper::addRoute('says_upload_blob', '/memos/api/v1/resource/blob', '\TypechoPlugin\Says\Action', 'uploadResourceBlob');
+        // memos 兼容:当前用户(扩展认证阶梯第一站,命中可省两次 404 探测)
+        Helper::addRoute('says_auth_me', '/memos/api/v1/auth/me', '\TypechoPlugin\Says\Action', 'authMe');
+        // 发布说说(legacy 单数路径由 says_list 网关分发,复数路径不再注册)
+        // 上传附件(legacy multipart 由 says_upload_blob 承担,base64 复数路径不再注册)
         // 获取所有标签
         Helper::addRoute('says_tags', '/memos/api/v1/tags', '\TypechoPlugin\Says\Action', 'getTags');
         // 后台管理相关
@@ -70,9 +72,9 @@ class Plugin implements PluginInterface {
     public static function deactivate() {
         // 移除路由
         Helper::removeRoute('says_list');
-        Helper::removeRoute('says_auth');
-        Helper::removeRoute('says_create');
-        Helper::removeRoute('says_upload_attachment');
+        Helper::removeRoute('says_profile');
+        Helper::removeRoute('says_upload_blob');
+        Helper::removeRoute('says_auth_me');
         Helper::removeRoute('says_tags');
         // 移除后台菜单和操作
         Helper::removePanel(2, 'Says/Manage.php');
@@ -109,23 +111,13 @@ class Plugin implements PluginInterface {
         $token = new Textarea('token', null, '', _t('用户id和API访问令牌每行1个，格式 id|token'), _t('用于API接口认证的用户ID和对应令牌，令牌建议使用32位以上的随机字符串'));
         $form->addInput($token);
 
-        // 小尾巴设置
-        $platform = new Textarea(
-            'platform',
-            NULL,
-            _t("绿泡泡 V\\\\1||MicroMessenger\/(.*?)\(\n全能的Windows||Windows精致的MacOS||Mac\n肾疼的IPhone||iPhone\n泡面盖子IPad||iPad\n曾经卡死的Android||Android\n真正的神Linux||Linux"),
-            _t('来源名称'),
-            _t('要识别的小尾巴，格式 [要显示的名称]||[要包含的字符串]，多个小尾巴用换行分隔，例如：Chrome浏览器|Chrome/，优先级从上往下')
-        );
-        $form->addInput($platform);
-
         // 默认来源
         $defaultSource = new Text(
             'defaultSource',
             NULL,
             '',
             _t('默认来源'),
-            _t('如果所有的都没匹配到，则显示这个默认来源，可选值：直接留空:不显示来源 1:显示操作系统 2:显示浏览器 3:操作系统+浏览器，如果要显示自定义，直接 填写自定义内容')
+            _t('如果你没有填写来源，就显示这个，可以留空，留空则显示来源为空')
         );
         $form->addInput($defaultSource);
 
@@ -158,26 +150,6 @@ class Plugin implements PluginInterface {
             _t('请填写附件子目录格式,仅支持PHP的date()格式符,例如:Y/md(Y年/md月日),只用date格式符,不支持自定义英文目录。Local图床固定存放在站点usr/uploads目录下,存储路径为其下的子目录;云图床则是存储桶内的路径')
         );
         $form->addInput($storagePath);
-
-        // 文件重命名规则
-        $fileNewName = new Select(
-            'fileNewName',
-            ['uuid' => _t('UUID'), 'unique' => _t('唯一ID')],
-            'uuid',
-            _t('文件重命名规则'),
-            _t('选择上传文件的重命名规则')
-        );
-        $form->addInput($fileNewName);
-
-        // 最大上传文件大小
-        $maxFileSize = new Text(
-            'maxFileSize',
-            NULL,
-            '2',
-            _t('最大上传文件大小'),
-            _t('请填写最大上传文件大小，单位是：M，例如：2表示2M，留空表示不限制大小')
-        );
-        $form->addInput($maxFileSize);
 
         // 可上传文件类型
         $allowedFileTypes = new Text(
@@ -226,35 +198,77 @@ class Plugin implements PluginInterface {
     }
 
     /**
-     * 升级插件时的操作
+     * 升级插件时的操作(激活时补全缺失列,兼容老版本升级)
      * @param Db $db 数据库连接对象
      */
     public static function upgrade(Db $db): void {
-        // 判定says表中是否存在 position和client字段，如果没有则添加
-        $column = 'position';
-        // 不同数据库的查询语句不同
+        // 获取当前数据库的适配器类型
         $adapterName = self::getAdapterName($db);
-        // 获取现有的列名
-        if ($adapterName === 'mysql') {
+        // 待补全的列:表名(不带前缀) => [列名 => 列类型定义]
+        $columns = [
+            // 说说表:发布位置(2.0 新增)
+            'says' => [
+                'position' => 'VARCHAR(255) DEFAULT NULL',
+            ],
+            // 附件表:缩图地址(2.1 新增,无缩图时与 url 保持一致)
+            'says_attachment' => [
+                'thumb' => 'TEXT DEFAULT NULL',
+                'douban' => 'TINYINT(1) DEFAULT 0', // 附件是否为豆瓣图片(2.2 新增)
+            ],
+        ];
+        // 逐表检查补全
+        foreach ($columns as $table => $cols) {
+            // 完整表名
+            $tableName = $db->getPrefix() . $table;
             // 获取现有的列名
-            $result = $db->fetchAll('SHOW COLUMNS FROM `' . $db->getPrefix() . 'says`');
-            // 提取列名
-            $existingColumns = array_column($result, 'Field');
-            // 判断是否已经存在该列，不存在则添加
-            if (!in_array($column, $existingColumns)) $db->query('ALTER TABLE `' . $db->getPrefix() . 'says` ADD COLUMN `' . $column . '` VARCHAR(255) DEFAULT NULL');
-        } elseif ($adapterName === 'sqlite') {
-            // SQLite使用PRAGMA table_info来获取表结构
-            $result = $db->fetchAll('PRAGMA table_info(`' . $db->getPrefix() . 'says`)');
-            // 提取列名
-            $existingColumns = array_column($result, 'name');
-            // 判断是否已经存在该列，不存在则添加
-            if (!in_array($column, $existingColumns))  $db->query('ALTER TABLE ' . $db->getPrefix() . 'says ADD COLUMN ' . $column . ' VARCHAR(255) DEFAULT NULL');
-        } elseif ($adapterName === 'pgsql') {
-            // PostgreSQL使用information_schema.columns来获取表结构
-            $result = $db->fetchAll("SELECT column_name FROM information_schema.columns WHERE table_name='" . $db->getPrefix() . "says' AND column_name='" . $column . "'");
-            // 判断是否已经存在该列，不存在则添加
-            if (empty($result)) $db->query('ALTER TABLE "' . $db->getPrefix() . 'says" ADD COLUMN "' . $column . '" VARCHAR(255) DEFAULT NULL');
+            $existingColumns = self::getTableColumns($db, $adapterName, $tableName);
+            // 逐列判断,不存在则添加
+            foreach ($cols as $column => $definition) {
+                // 已存在跳过
+                if (in_array($column, $existingColumns)) continue;
+                // 不同数据库的补列语句写法不同
+                if ($adapterName === 'mysql') {
+                    $db->query('ALTER TABLE `' . $tableName . '` ADD COLUMN `' . $column . '` ' . $definition);
+                } elseif ($adapterName === 'sqlite') {
+                    $db->query('ALTER TABLE ' . $tableName . ' ADD COLUMN ' . $column . ' ' . $definition);
+                } else {
+                    $db->query('ALTER TABLE "' . $tableName . '" ADD COLUMN "' . $column . '" ' . $definition);
+                }
+            }
         }
+        // 回填附件缩图字段:老数据没有缩图,先与原图 url 保持一致,保证字段永远有值(前端零回退逻辑)
+        // 注:曾试用过又放弃的 large 字段如已存在于个别库中,保留无害,不做删除
+        $attachmentTable = $db->getPrefix() . 'says_attachment';
+        // 按适配器选择表名引号
+        $quoted = $adapterName === 'mysql' ? '`' . $attachmentTable . '`' : ($adapterName === 'pgsql' ? '"' . $attachmentTable . '"' : $attachmentTable);
+        // 执行回填(已是新数据的行不受影响)
+        $db->query('UPDATE ' . $quoted . ' SET thumb = url WHERE thumb IS NULL');
+    }
+
+    /**
+     * 获取表的现有列名
+     * @param Db $db 数据库连接对象
+     * @param string $adapterName 适配器名称
+     * @param string $tableName 完整表名(带前缀)
+     * @return array 列名列表
+     */
+    private static function getTableColumns(Db $db, string $adapterName, string $tableName): array {
+        // MySQL 用 SHOW COLUMNS
+        if ($adapterName === 'mysql') {
+            $result = $db->fetchAll('SHOW COLUMNS FROM `' . $tableName . '`');
+            // 提取列名
+            return array_column($result, 'Field');
+        }
+        // SQLite 用 PRAGMA table_info
+        if ($adapterName === 'sqlite') {
+            $result = $db->fetchAll('PRAGMA table_info(`' . $tableName . '`)');
+            // 提取列名
+            return array_column($result, 'name');
+        }
+        // PostgreSQL 用 information_schema
+        $result = $db->fetchAll("SELECT column_name FROM information_schema.columns WHERE table_name='" . $tableName . "'");
+        // 提取列名
+        return array_column($result, 'column_name');
     }
 
     /**
@@ -308,8 +322,8 @@ class Plugin implements PluginInterface {
             $adapterName = 'mysql'; // mysql
         } elseif (strpos($adapter, 'SQLite') !== false) {
             $adapterName = 'sqlite'; // sqlite
-        } elseif (strpos($adapter, 'PostgreSQL') !== false) {
-            $adapterName = 'pgsql'; // postgresql
+        } elseif (strpos($adapter, 'PostgreSQL') !== false || strpos($adapter, 'PgSQL') !== false) {
+            $adapterName = 'pgsql'; // postgresql(Typecho 适配器名为 PgSQL / Pdo_PgSQL)
         }
         // 如果没有适配器类型,直接跳过删除,不阻断禁用流程
         if (!$adapterName) throw new PluginException('不支持的数据库类型: ' . $adapter);
