@@ -52,23 +52,23 @@ class Gd extends Thumbnail
             // 调色板图先转真彩,后续旋转/缩放才不丢色
             $truecolor = $this->ensureTrueColor($image);
             if ($truecolor !== $image) {
-                imagedestroy($image);
+                if (PHP_VERSION_ID < 80000) imagedestroy($image);
                 $image = $truecolor;
             }
             // 修正 EXIF 方向(可能返回旋转后的新资源)
             $rotated = $this->orient($image, $source);
             if ($rotated !== $image) {
-                imagedestroy($image);
+                if (PHP_VERSION_ID < 80000) imagedestroy($image);
                 $image = $rotated;
             }
             // 缩放到目标尺寸
             $resized = $this->resize($image, $dstWidth, $dstHeight);
             // 源资源用完即释放
-            imagedestroy($image);
+            if (PHP_VERSION_ID < 80000) imagedestroy($image);
             // 编码写出
             $ok = $this->encode($resized, $dest, $mime, $quality);
             // 释放缩放结果
-            imagedestroy($resized);
+            if (PHP_VERSION_ID < 80000) imagedestroy($resized);
             // 返回编码结果
             return $ok;
         } finally {

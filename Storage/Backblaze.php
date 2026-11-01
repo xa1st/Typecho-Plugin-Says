@@ -284,7 +284,7 @@ class Backblaze extends Storage {
         // 完整存储路径(带前缀)
         $path = ltrim($path, '/');
         // 是否使用自定义域名
-        return $this->domain !== '' ? ($this->domain . '/' . $this->path . $path) : ('https://f002.backblazeb2.com/file/' . $this->bucketName . '/' . $this->path . $path);
+        return $this->domain !== '' ? ($this->domain . '/' . $path) : ('https://f002.backblazeb2.com/file/' . $this->bucketName . '/' . $this->path . $path);
     }
 
     /**
