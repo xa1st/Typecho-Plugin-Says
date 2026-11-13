@@ -110,35 +110,83 @@ Authorization: Bearer <你的令牌>
 
 ### 图床类型
 
-在 **插件设置 > 图床管理** 选择:
+在 **插件设置 > 图床管理** 选择存储类型:
 
-| 类型 | 说明 |
-|---|---|
-| **本地(Local)** | 文件固定存放在站点 `usr/uploads` 目录下 |
-| **Backblaze B2** | 上传到 B2 存储桶 |
-| **又拍云(Upyun)** | 上传到又拍云空间 |
+| 类型 | 缩图方式 | 说明 |
+|---|---|---|
+| **本地(Local)** | 物理缩图 | 文件固定存放在站点 `usr/uploads` 目录下 |
+| **Backblaze B2** | 物理缩图 | 上传到 B2 存储桶,缩图文件随原图一并上传 |
+| **又拍云(Upyun)** | 参数缩图 | 上传到又拍云空间,URL 拼图片处理参数按需出缩图 |
 
-图床参数(storageConfig)以 JSON 格式填写在插件设置中,各图床所需字段不同:
+云图床通过 Typecho HTTP 客户端请求,依赖 **cURL 扩展**。图床参数(storageConfig)以 JSON 格式填写在"图床参数设置"中;**密钥等敏感信息一律写入站点根目录的 `config.inc.php`,不要写入数据库配置**。各图床的详细参数与特别设置见下文。
 
-- **local**:一般留空(存储目录固定为 `usr/uploads`)
-- **backblaze**:`{"bucketId":"xxx","bucketName":"xxx","path":"says/","domain":""}`(path为桶内路径前缀,domain为自定义域名,可选)
-- **upyun**:`{"bucket":"xxx","endpoint":"","url":""}`(endpoint为API端点,url为自定义访问域名,均可选)
+### 本地(Local)
 
-### 密钥配置(重要)
+参数留空即可,存储目录固定为 `usr/uploads`,其下子目录由"附件存储路径"决定:
 
-**密钥(applicationKey/密码等敏感信息)不要写入数据库配置,请写入站点根目录的 `config.inc.php`:**
+```json
+{}
+```
+
+- 可选 `"url"`:自定义公开访问前缀(如附件走独立 CDN 域名),留空使用站点地址
+
+### Backblaze B2
+
+**图床参数(storageConfig):**
+
+```json
+{"bucketId":"xxx","bucketName":"xxx","path":"says/","domain":""}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `bucketId` | 是 | 桶 ID(控制台 Buckets 页面中的 Bucket ID,不是桶名称) |
+| `bucketName` | 是 | 桶名称,用于拼接默认访问地址 |
+| `path` | 否 | 桶内固定路径前缀,自动补尾 `/`,留空表示桶根目录。实际目录 = `path` + "附件存储路径"生成的日期目录 |
+| `domain` | 否 | 自定义访问域名,留空使用 `https://f002.backblazeb2.com/file/<bucketName>` |
+
+**密钥(config.inc.php):**
 
 ```php
-// Backblaze B2
-define('SAYS_B2_KEY_ID', '你的 KeyID');
-define('SAYS_B2_APPLICATION_KEY', '你的应用密钥');
+define('BACKBLAZE_KEY_ID', '你的 KeyID');
+define('BACKBLAZE_APPLICATION_KEY', '你的应用密钥');
+```
 
-// 又拍云
+**特别设置(重要):**
+
+- 桶类型必须为 **Public**:插件拼接的是免签名直链,私有桶默认地址无法直接访问
+- 建议单独创建 App Key 并勾选 `Delete Files` 权限(删除附件时需要调用删除接口),并限制到对应桶;Master Key 也可用但权限过大,不建议使用
+- `domain` 与 `path` 的关系:配置 `domain` 后访问地址为 `<domain>/<日期目录>/<文件名>`,**不再拼接 `path` 前缀**。两者同时使用时,请把桶内前缀整体写进 `domain`(如 `https://f002.backblazeb2.com/file/<bucketName>/<path>`);最省事的做法是 `path` 留空、`domain` 绑定桶根(如 Cloudflare 代理域名)
+- 默认访问地址固定拼接 `f002.backblazeb2.com`,若你的桶在其他区域导致直链 404,请把 `domain` 填为对应区域的下载地址
+
+### 又拍云(Upyun)
+
+**图床参数(storageConfig):**
+
+```json
+{"bucket":"xxx","endpoint":"","url":""}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `bucket` | 是 | 空间名称 |
+| `endpoint` | 否 | REST API 接入点,留空为 `https://v0.api.upyun.com`(电信);可选 v1(联通)/ v2(移动)/ v3(全球自动),按服务器线路选择 |
+| `url` | 否 | 自定义访问域名,留空使用空间默认域名 |
+
+**密钥(config.inc.php):**
+
+```php
 define('SAYS_UPYUN_OPERATOR', '操作员名');
 define('SAYS_UPYUN_PASSWORD', '操作员密码');
 ```
 
-不定义这些常量而选择对应图床时,上传会直接报错提示缺少配置。
+**特别设置(重要):**
+
+- 空间需开通 **图片处理** 功能:缩图为参数模式,不生成物理缩图文件,直接在访问 URL 拼接 `!/fw/200/fh/200` 由又拍云按需生成并边缘缓存;未开通时缩图地址 404(GIF 动图自动跳过,直接使用原图)
+- 密钥填写**操作员**的账号与密码(控制台 > 存储管理 > 操作员),不是又拍云登录账号;操作员需授予对应空间的**可读写**权限(上传/删除都需要)
+- `url` 域名需先在又拍云控制台绑定并完成 CNAME 解析;空间默认(测试)域名有限速等限制,正式使用建议绑定自有域名
+
+不定义密钥常量而选择对应云图床时,上传会直接报错提示缺少配置。
 
 ### 附件相关设置
 
